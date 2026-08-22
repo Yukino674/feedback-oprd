@@ -23,7 +23,7 @@ skills 以及相关示例。自定义的 OPRD-Bridge 模块已经放在正确的
 ## Bridge Bank 构建
 
 `ps_bank.pt` 基于 ALFWorld 的 TCOD/SDAR turn-level experience buffer 构建：先收集
-最多 250 个训练 step 的 student/teacher response hidden states，再提取所有 decoder
+训练 step 的 student/teacher response hidden states，再提取所有 decoder
 层的 response-token 表示。对 teacher 表示拟合 PCA 子空间，并为每一对 student/teacher
 层训练线性投影器，使 student hidden 能对齐到 teacher 的低秩表示。构建脚本会生成多个
 rank 版本；本仓库使用的是 rank-64 的 `artifacts/bridge_bank/ps_bank.pt`。
@@ -33,8 +33,6 @@ rank 版本；本仓库使用的是 rank-64 的 `artifacts/bridge_bank/ps_bank.p
 - `build_all_layers_bridge_bank_formal.py`
 - `oprd_bridge_construction_sdar_clean_b16tb16_r8_f250.yaml`
 
-重新构建时需要准备 TCOD experience buffer、Qwen3-1.7B 和 Qwen3-8B 模型，以及
-ALFWorld 数据；已有的 `ps_bank.pt` 已随仓库提供，无需重新构建即可运行训练。
 
 ## 外部依赖
 
