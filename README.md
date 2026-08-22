@@ -57,16 +57,19 @@ export ALFWORLD_DATA=/path/to/alfworld
 
 复现者可以先阅读[快速开始](QUICKSTART.md)。
 
-在仓库根目录执行：
+在仓库根目录执行精简复现安装：
 
 ```bash
-conda env create -f environment.yml
+conda create -n atod-oprd python=3.12 pip -y
 conda activate atod-oprd
+pip install -r requirements_repro.txt
+pip install --no-build-isolation flash-attn==2.7.4.post1
+pip install --no-deps -e .
 ```
 
-`environment.yml` 是当前实验实际使用的环境清单；完整 pip 清单保存在
-`requirements_atod_oprd_actual.txt`。原 ATOD 环境快照另存为
-`environment_atod_upstream.yml`，不作为本实验的默认安装文件。
+`requirements_repro.txt` 是面向复现者的精简依赖清单。`environment.yml` 和
+`requirements_atod_oprd_actual.txt` 是服务器实际环境快照，仅用于记录版本，
+不建议直接用于其他机器安装。原 ATOD 环境快照另存为 `environment_atod_upstream.yml`。
 
 训练入口从 ATOD 环境启动，例如：
 
@@ -76,9 +79,8 @@ python3 -m verl.trainer.main_sod_oprd_bridge_stepwise_feedback
 
 具体 Hydra 参数保存在对应的 `.sbatch` 启动脚本中。
 
-如果当前集群无法访问 `environment.yml` 中的内部 Conda 镜像，可以根据
-`requirements.txt` 在已有的 PyTorch/CUDA 环境中安装 Python 依赖，并确保
-PyTorch、vLLM、Ray 和 Flash-Attention 版本相互兼容。
+如果当前机器已有兼容的 PyTorch/CUDA 环境，可以跳过 PyTorch 安装并按
+`requirements_repro.txt` 安装其余依赖；Flash-Attention、vLLM 和 PyTorch 需要保持兼容。
 
 ## 运行训练
 

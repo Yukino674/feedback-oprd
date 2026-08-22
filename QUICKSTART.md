@@ -11,11 +11,15 @@ cd feedback-oprd
 git lfs install
 git lfs pull
 
-conda env create -f environment.yml
+conda create -n atod-oprd python=3.12 pip -y
 conda activate atod-oprd
+pip install -r requirements_repro.txt
+pip install --no-build-isolation flash-attn==2.7.4.post1
+pip install --no-deps -e .
 ```
 
-如果 Conda 环境已经存在，可以跳过 `conda env create`。
+这里使用的是精简复现依赖，不使用服务器环境导出的 `environment.yml`。
+如果 Conda 环境已经存在，可以跳过环境创建步骤。
 
 ## 2. 准备 ALFWorld 数据
 

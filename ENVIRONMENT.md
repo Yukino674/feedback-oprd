@@ -1,7 +1,8 @@
 # 实际训练环境
 
-`environment.yml` 是从服务器当前使用的 `atod-oprd` Conda 环境导出的版本清单。`requirements_atod_oprd_actual.txt` 是同一环境的
-Python pip 包清单，便于排查 Conda 导出或 CUDA 安装问题。
+`requirements_repro.txt` 是面向复现者的精简安装清单。`environment.yml` 和
+`requirements_atod_oprd_actual.txt` 是从服务器当前使用的 `atod-oprd` 环境导出的
+版本快照，仅用于记录和排查，不建议直接在其他机器上创建环境。
 
 ## 关键版本
 
@@ -21,8 +22,11 @@ Python pip 包清单，便于排查 Conda 导出或 CUDA 安装问题。
 ## 安装
 
 ```bash
-conda env create -f environment.yml
+conda create -n atod-oprd python=3.12 pip -y
 conda activate atod-oprd
+pip install -r requirements_repro.txt
+pip install --no-build-isolation flash-attn==2.7.4.post1
+pip install --no-deps -e .
 ```
 
 该清单面向 Linux + NVIDIA CUDA 环境。GPU 驱动需要支持 CUDA 12.8；如果集群的
