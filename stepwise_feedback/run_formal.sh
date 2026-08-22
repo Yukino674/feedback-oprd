@@ -12,7 +12,7 @@ TEACHER_MODEL_PATH="${TEACHER_MODEL_PATH:-/path/to/Qwen3-8B}"
 # Put the raw ALFWorld files here, or change this path.
 ALFWORLD_DATA="${ALFWORLD_DATA:-$HOME/data/alfworld}"
 
-# Conda and logging settings.
+# Conda and logging settings. Change CONDA_ENV if you used another name.
 CONDA_ENV="${CONDA_ENV:-atod-oprd}"
 CONDA_SH="${CONDA_SH:-}"
 WANDB_MODE="${WANDB_MODE:-online}"
