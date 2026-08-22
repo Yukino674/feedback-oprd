@@ -111,6 +111,8 @@ sbatch hidden_only/run_formal.sbatch
   ALFWorld turn 中，学生先生成原始 response，teacher 通过 vLLM 给出反馈，学生重新生成，
   环境执行重写后的动作，并在重写后的 response 上计算 hidden loss。正式配置同样为
   150 steps、每 10 steps 保存、每 5 steps 评估。
+- `stepwise_feedback/run_formal.sh`：简洁的 Slurm 提交入口，会自动提交同目录下的
+  `run_formal.sbatch`。
 - `stepwise_feedback/run_formal.sh`：面向复现者的简洁入口，会自动提交同目录下的
   `run_formal.sbatch`。它需要在 Slurm 集群上运行。
 - `bridge_bank/`：bridge bank 构建脚本，不是训练入口；已有的 rank-64 bank 位于
