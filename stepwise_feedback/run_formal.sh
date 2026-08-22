@@ -5,10 +5,9 @@
 set -euo pipefail
 
 # ======================== USER SETTINGS ========================
-# Usually only MODEL_ROOT needs to be changed. The directory should contain:
-#   Qwen--Qwen3-1.7B/snapshots/master
-#   Qwen--Qwen3-8B/snapshots/master
-MODEL_ROOT="${MODEL_ROOT:-$HOME/models/models}"
+# Set the two local model directories explicitly.
+STUDENT_MODEL_PATH="${STUDENT_MODEL_PATH:-/path/to/Qwen3-1.7B}"
+TEACHER_MODEL_PATH="${TEACHER_MODEL_PATH:-/path/to/Qwen3-8B}"
 
 # Put the raw ALFWorld files here, or change this path.
 ALFWORLD_DATA="${ALFWORLD_DATA:-$HOME/data/alfworld}"
@@ -17,10 +16,6 @@ ALFWORLD_DATA="${ALFWORLD_DATA:-$HOME/data/alfworld}"
 CONDA_ENV="${CONDA_ENV:-atod-oprd}"
 CONDA_SH="${CONDA_SH:-}"
 WANDB_MODE="${WANDB_MODE:-online}"
-
-# Optional: use these if the two model directories do not follow MODEL_ROOT.
-STUDENT_MODEL_PATH="${STUDENT_MODEL_PATH:-}"
-TEACHER_MODEL_PATH="${TEACHER_MODEL_PATH:-}"
 
 # Optional: override the repository's LFS/downloaded bank and parquet files.
 BRIDGE_BANK_PATH="${BRIDGE_BANK_PATH:-}"
@@ -66,9 +61,8 @@ unset ROCR_VISIBLE_DEVICES
 
 mkdir -p "$TMPDIR" "$RAY_TMPDIR" "$HF_HOME"
 
-model_root="$MODEL_ROOT"
-student_model_path="${STUDENT_MODEL_PATH:-$model_root/Qwen--Qwen3-1.7B/snapshots/master}"
-teacher_model_path="${TEACHER_MODEL_PATH:-$model_root/Qwen--Qwen3-8B/snapshots/master}"
+student_model_path="$STUDENT_MODEL_PATH"
+teacher_model_path="$TEACHER_MODEL_PATH"
 bridge_bank_path="${BRIDGE_BANK_PATH:-$repo_root/artifacts/bridge_bank/ps_bank.pt}"
 train_file="${TRAIN_FILE:-$repo_root/data/verl-agent/text/train.parquet}"
 val_file="${VAL_FILE:-$repo_root/data/verl-agent/text/test.parquet}"

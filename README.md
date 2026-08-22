@@ -83,7 +83,6 @@ PyTorch、vLLM、Ray 和 Flash-Attention 版本相互兼容。
 - `ATOD_REPO`
 - `CONDA_SH`
 - `CONDA_ENV`
-- `MODEL_ROOT`
 - `STUDENT_MODEL_PATH`
 - `TEACHER_MODEL_PATH`
 - `BRIDGE_BANK_PATH`
@@ -95,12 +94,12 @@ PyTorch、vLLM、Ray 和 Flash-Attention 版本相互兼容。
 `ATOD_REPO`、`CONDA_ENV` 和 `CONDA_SH` 在安装位置与默认值一致时也不需要设置。
 首次 clone 后如果仓库使用 Git LFS，请先执行 `git lfs pull`。
 
-需要手动准备 Qwen3-1.7B、Qwen3-8B 和原始 ALFWorld 数据。若两套模型放在同一个
-根目录下，目录结构为 `Qwen--Qwen3-1.7B/snapshots/master` 和
-`Qwen--Qwen3-8B/snapshots/master`，只需设置一个模型根目录：
+需要手动准备 Qwen3-1.7B、Qwen3-8B 和原始 ALFWorld 数据。在脚本顶部的
+`USER SETTINGS` 区域分别填写两个模型目录：
 
 ```bash
-export MODEL_ROOT=/path/to/models
+STUDENT_MODEL_PATH="/path/to/Qwen3-1.7B"
+TEACHER_MODEL_PATH="/path/to/Qwen3-8B"
 ```
 
 原始 ALFWorld 数据默认从 `$HOME/data/alfworld` 读取；如果放在其他位置，再设置：
@@ -109,8 +108,7 @@ export MODEL_ROOT=/path/to/models
 export ALFWORLD_DATA=/path/to/alfworld
 ```
 
-如果模型目录结构不同，也可以分别设置 `STUDENT_MODEL_PATH` 和
-`TEACHER_MODEL_PATH` 覆盖自动路径。WandB 需要先登录一次：
+WandB 默认使用 online 模式，需要先登录一次：
 
 ```bash
 wandb login
@@ -130,7 +128,8 @@ bash stepwise_feedback/run_formal.sh
 ```
 
 也可以直接打开 `stepwise_feedback/run_formal.sh` 顶部的 `USER SETTINGS` 区域，修改
-`MODEL_ROOT` 和 `ALFWORLD_DATA`，再运行脚本；其余路径通常保持默认即可。
+`STUDENT_MODEL_PATH`、`TEACHER_MODEL_PATH` 和 `ALFWORLD_DATA`，再运行脚本；其余路径
+通常保持默认即可。
 
 或者直接运行 hidden-only 基线：
 
