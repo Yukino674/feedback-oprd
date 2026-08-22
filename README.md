@@ -78,9 +78,10 @@ PyTorch、vLLM、Ray 和 Flash-Attention 版本相互兼容。
 
 ## 运行训练
 
-通用 Slurm 脚本支持以下环境变量：
+正式脚本支持以下环境变量：
 
 - `ATOD_REPO`
+- `CONDA_SH`
 - `CONDA_ENV`
 - `STUDENT_MODEL_PATH`
 - `TEACHER_MODEL_PATH`
@@ -89,8 +90,26 @@ PyTorch、vLLM、Ray 和 Flash-Attention 版本相互兼容。
 - `VAL_FILE`
 - `ALFWORLD_DATA`
 
-parquet 文件和 bridge bank 默认使用仓库内的路径。设置好 ALFWorld 数据和模型路径后，
-在普通多 GPU 服务器上可以直接运行：
+其中 `TRAIN_FILE`、`VAL_FILE` 和 `BRIDGE_BANK_PATH` 默认使用仓库内的文件；
+`ATOD_REPO`、`CONDA_ENV` 和 `CONDA_SH` 在安装位置与默认值一致时也不需要设置。
+首次 clone 后如果仓库使用 Git LFS，请先执行 `git lfs pull`。
+
+需要手动准备 Qwen3-1.7B、Qwen3-8B 和原始 ALFWorld 数据。一个最小配置示例：
+
+```bash
+export STUDENT_MODEL_PATH=/path/to/Qwen3-1.7B
+export TEACHER_MODEL_PATH=/path/to/Qwen3-8B
+export ALFWORLD_DATA=/path/to/alfworld
+```
+
+如果 Conda 不在默认的 `$HOME/miniconda3`，再设置：
+
+```bash
+export CONDA_SH=/path/to/miniconda3/etc/profile.d/conda.sh
+export CONDA_ENV=atod-oprd
+```
+
+准备好 8 张可见 GPU 后，在普通多 GPU 服务器上直接运行：
 
 ```bash
 bash stepwise_feedback/run_formal.sh
