@@ -102,4 +102,19 @@ sbatch stepwise_feedback/run_formal.sbatch
 sbatch hidden_only/run_formal.sbatch
 ```
 
+## 实验脚本简介
+
+- `hidden_only/run_formal.sbatch`：OPRD-Bridge hidden-only 基线。保留 SOD/OPD rollout
+  框架，但训练更新主要使用 hidden-state bridge loss，不使用逐步教师反馈。正式配置为
+  150 steps，保存间隔 10 steps，评估间隔 5 steps。
+- `stepwise_feedback/run_formal.sbatch`：Step-wise Feedback-Guided OPRD-Bridge。每个
+  ALFWorld turn 中，学生先生成原始 response，teacher 通过 vLLM 给出反馈，学生重新生成，
+  环境执行重写后的动作，并在重写后的 response 上计算 hidden loss。正式配置同样为
+  150 steps、每 10 steps 保存、每 5 steps 评估。
+- `bridge_bank/`：bridge bank 构建脚本，不是训练入口；已有的 rank-64 bank 位于
+  `artifacts/bridge_bank/ps_bank.pt`。
+
+两个正式入口都支持通过环境变量覆盖模型、数据和 bank 路径，例如
+`STUDENT_MODEL_PATH`、`TEACHER_MODEL_PATH`、`TRAIN_FILE`、`VAL_FILE`、
+`BRIDGE_BANK_PATH` 和 `ALFWORLD_DATA`。
 
