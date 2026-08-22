@@ -83,6 +83,7 @@ PyTorch、vLLM、Ray 和 Flash-Attention 版本相互兼容。
 - `ATOD_REPO`
 - `CONDA_SH`
 - `CONDA_ENV`
+- `MODEL_ROOT`
 - `STUDENT_MODEL_PATH`
 - `TEACHER_MODEL_PATH`
 - `BRIDGE_BANK_PATH`
@@ -94,15 +95,28 @@ PyTorch、vLLM、Ray 和 Flash-Attention 版本相互兼容。
 `ATOD_REPO`、`CONDA_ENV` 和 `CONDA_SH` 在安装位置与默认值一致时也不需要设置。
 首次 clone 后如果仓库使用 Git LFS，请先执行 `git lfs pull`。
 
-需要手动准备 Qwen3-1.7B、Qwen3-8B 和原始 ALFWorld 数据。一个最小配置示例：
+需要手动准备 Qwen3-1.7B、Qwen3-8B 和原始 ALFWorld 数据。若两套模型放在同一个
+根目录下，目录结构为 `Qwen--Qwen3-1.7B/snapshots/master` 和
+`Qwen--Qwen3-8B/snapshots/master`，只需设置一个模型根目录：
 
 ```bash
-export STUDENT_MODEL_PATH=/path/to/Qwen3-1.7B
-export TEACHER_MODEL_PATH=/path/to/Qwen3-8B
+export MODEL_ROOT=/path/to/models
+```
+
+原始 ALFWorld 数据默认从 `$HOME/data/alfworld` 读取；如果放在其他位置，再设置：
+
+```bash
 export ALFWORLD_DATA=/path/to/alfworld
 ```
 
-如果 Conda 不在默认的 `$HOME/miniconda3`，再设置：
+如果模型目录结构不同，也可以分别设置 `STUDENT_MODEL_PATH` 和
+`TEACHER_MODEL_PATH` 覆盖自动路径。WandB 需要先登录一次：
+
+```bash
+wandb login
+```
+
+脚本会自动探测常见的 Conda 安装位置；如果仍然找不到 Conda，再设置：
 
 ```bash
 export CONDA_SH=/path/to/miniconda3/etc/profile.d/conda.sh
@@ -132,7 +146,7 @@ bash hidden_only/run_formal.sh
   环境执行重写后的动作，并在重写后的 response 上计算 hidden loss。正式配置同样为
   150 steps、每 10 steps 保存、每 5 steps 评估。
 - `stepwise_feedback/run_formal.sh`：非 Slurm 环境的独立正式运行脚本，包含完整的环境
-  初始化、路径检查和训练参数，默认使用 8 张 GPU。
+  初始化、路径检查和训练参数，默认使用 8 张 GPU，并将日志写入 WandB。
 - `stepwise_feedback/run_formal.sbatch`：面向 Slurm 集群的同配置提交脚本；非 Slurm 用户
   不需要使用它。
 - `bridge_bank/`：bridge bank 构建脚本，不是训练入口；已有的 rank-64 bank 位于

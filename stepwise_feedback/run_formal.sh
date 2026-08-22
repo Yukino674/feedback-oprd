@@ -6,7 +6,24 @@ set -euo pipefail
 
 release_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repo_root="${ATOD_REPO:-$release_root}"
-source "${CONDA_SH:-$HOME/miniconda3/etc/profile.d/conda.sh}"
+conda_sh="${CONDA_SH:-}"
+if [[ -z "$conda_sh" && -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]]; then
+    conda_sh="$HOME/miniconda3/etc/profile.d/conda.sh"
+fi
+if [[ -z "$conda_sh" && -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]]; then
+    conda_sh="$HOME/anaconda3/etc/profile.d/conda.sh"
+fi
+if [[ -z "$conda_sh" ]] && command -v conda >/dev/null 2>&1; then
+    conda_base="$(conda info --base 2>/dev/null || true)"
+    if [[ -n "$conda_base" && -f "$conda_base/etc/profile.d/conda.sh" ]]; then
+        conda_sh="$conda_base/etc/profile.d/conda.sh"
+    fi
+fi
+if [[ -z "$conda_sh" || ! -f "$conda_sh" ]]; then
+    echo "Could not find conda.sh. Set CONDA_SH to your Conda profile script." >&2
+    exit 2
+fi
+source "$conda_sh"
 conda activate "${CONDA_ENV:-atod-oprd}"
 cd "$repo_root"
 
@@ -18,16 +35,15 @@ export TMP="$TMPDIR"
 export RAY_TMPDIR="${RAY_TMPDIR:-$run_root/ray_sfbvllm_formal150_$run_id}"
 export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME}"
-export SWANLAB_LOG_DIR="${SWANLAB_LOG_DIR:-$run_root/swanlab/sfbvllm_formal150_save10_eval5_$run_id}"
-export SWANLAB_MODE="${SWANLAB_MODE:-cloud}"
 export PYTHONPATH="$repo_root:${PYTHONPATH:-}"
 export ALFWORLD_DATA="${ALFWORLD_DATA:-$HOME/data/alfworld}"
 unset ROCR_VISIBLE_DEVICES
 
-mkdir -p "$TMPDIR" "$RAY_TMPDIR" "$HF_HOME" "$SWANLAB_LOG_DIR"
+mkdir -p "$TMPDIR" "$RAY_TMPDIR" "$HF_HOME"
 
-student_model_path="${STUDENT_MODEL_PATH:-$HOME/models/models/Qwen--Qwen3-1.7B/snapshots/master}"
-teacher_model_path="${TEACHER_MODEL_PATH:-$HOME/models/models/Qwen--Qwen3-8B/snapshots/master}"
+model_root="${MODEL_ROOT:-$HOME/models/models}"
+student_model_path="${STUDENT_MODEL_PATH:-$model_root/Qwen--Qwen3-1.7B/snapshots/master}"
+teacher_model_path="${TEACHER_MODEL_PATH:-$model_root/Qwen--Qwen3-8B/snapshots/master}"
 bridge_bank_path="${BRIDGE_BANK_PATH:-$repo_root/artifacts/bridge_bank/ps_bank.pt}"
 train_file="${TRAIN_FILE:-$repo_root/data/verl-agent/text/train.parquet}"
 val_file="${VAL_FILE:-$repo_root/data/verl-agent/text/test.parquet}"
@@ -120,7 +136,7 @@ python3 -m verl.trainer.main_sod_oprd_bridge_stepwise_feedback \
     env.rollout.n=8 \
     env.resources_per_worker.num_cpus=0.1 \
     trainer.critic_warmup=0 \
-    'trainer.logger=["console","swanlab"]' \
+    'trainer.logger=["console","wandb"]' \
     trainer.project_name=verl_agent_alfworld \
     trainer.experiment_name=sod_oprd_bridge_stepwise_feedback_vllm_feedback_formal150_save10_eval5_4gpu \
     trainer.n_gpus_per_node=8 \
