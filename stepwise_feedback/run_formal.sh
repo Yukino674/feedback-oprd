@@ -4,6 +4,30 @@
 
 set -euo pipefail
 
+# ======================== USER SETTINGS ========================
+# Usually only MODEL_ROOT needs to be changed. The directory should contain:
+#   Qwen--Qwen3-1.7B/snapshots/master
+#   Qwen--Qwen3-8B/snapshots/master
+MODEL_ROOT="${MODEL_ROOT:-$HOME/models/models}"
+
+# Put the raw ALFWorld files here, or change this path.
+ALFWORLD_DATA="${ALFWORLD_DATA:-$HOME/data/alfworld}"
+
+# Conda and logging settings.
+CONDA_ENV="${CONDA_ENV:-atod-oprd}"
+CONDA_SH="${CONDA_SH:-}"
+WANDB_MODE="${WANDB_MODE:-online}"
+
+# Optional: use these if the two model directories do not follow MODEL_ROOT.
+STUDENT_MODEL_PATH="${STUDENT_MODEL_PATH:-}"
+TEACHER_MODEL_PATH="${TEACHER_MODEL_PATH:-}"
+
+# Optional: override the repository's LFS/downloaded bank and parquet files.
+BRIDGE_BANK_PATH="${BRIDGE_BANK_PATH:-}"
+TRAIN_FILE="${TRAIN_FILE:-}"
+VAL_FILE="${VAL_FILE:-}"
+# ====================== END USER SETTINGS ======================
+
 release_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repo_root="${ATOD_REPO:-$release_root}"
 conda_sh="${CONDA_SH:-}"
@@ -36,12 +60,13 @@ export RAY_TMPDIR="${RAY_TMPDIR:-$run_root/ray_sfbvllm_formal150_$run_id}"
 export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME}"
 export PYTHONPATH="$repo_root:${PYTHONPATH:-}"
-export ALFWORLD_DATA="${ALFWORLD_DATA:-$HOME/data/alfworld}"
+export ALFWORLD_DATA
+export WANDB_MODE
 unset ROCR_VISIBLE_DEVICES
 
 mkdir -p "$TMPDIR" "$RAY_TMPDIR" "$HF_HOME"
 
-model_root="${MODEL_ROOT:-$HOME/models/models}"
+model_root="$MODEL_ROOT"
 student_model_path="${STUDENT_MODEL_PATH:-$model_root/Qwen--Qwen3-1.7B/snapshots/master}"
 teacher_model_path="${TEACHER_MODEL_PATH:-$model_root/Qwen--Qwen3-8B/snapshots/master}"
 bridge_bank_path="${BRIDGE_BANK_PATH:-$repo_root/artifacts/bridge_bank/ps_bank.pt}"

@@ -129,6 +129,9 @@ export CONDA_ENV=atod-oprd
 bash stepwise_feedback/run_formal.sh
 ```
 
+也可以直接打开 `stepwise_feedback/run_formal.sh` 顶部的 `USER SETTINGS` 区域，修改
+`MODEL_ROOT` 和 `ALFWORLD_DATA`，再运行脚本；其余路径通常保持默认即可。
+
 或者直接运行 hidden-only 基线：
 
 ```bash
