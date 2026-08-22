@@ -19,14 +19,18 @@ conda activate atod-oprd
 
 ## 2. 准备 ALFWorld 数据
 
-下载完整的 ALFWorld 数据，并保证目录大致如下：
+建议将完整的 ALFWorld 数据解压到当前用户的 `$HOME/data/alfworld`。例如，
+如果用户名是 `alice`，实际目录就是 `/home/alice/data/alfworld`：
 
 ```text
-/path/to/alfworld/
+$HOME/data/alfworld/
 ├── json_2.1.1/
 ├── logic/
 └── detectors/
 ```
+
+脚本默认使用这个位置，因此通常不需要修改 `ALFWORLD_DATA`。如果数据放在其他
+目录，再把脚本顶部的 `ALFWORLD_DATA` 改成实际目录。
 
 ## 3. 设置路径
 

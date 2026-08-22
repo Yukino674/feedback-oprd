@@ -49,7 +49,9 @@ rank 版本；本仓库使用的是 rank-64 的 `artifacts/bridge_bank/ps_bank.p
 export ALFWORLD_DATA=/path/to/alfworld
 ```
 
-该目录应包含标准 ALFWorld 的 `json_2.1.1`、`detectors` 和 `logic` 子目录。
+建议将数据放在 `$HOME/data/alfworld`，例如用户 `alice` 对应
+`/home/alice/data/alfworld`。该目录应包含标准 ALFWorld 的 `json_2.1.1`、
+`detectors` 和 `logic` 子目录。
 
 ## 安装环境
 
