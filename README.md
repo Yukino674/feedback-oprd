@@ -90,7 +90,7 @@ PyTorch、vLLM、Ray 和 Flash-Attention 版本相互兼容。
 - `ALFWORLD_DATA`
 
 parquet 文件和 bridge bank 默认使用仓库内的路径。设置好 ALFWorld 数据和模型路径后，
-可以提交：
+在普通多 GPU 服务器上可以直接运行：
 
 ```bash
 bash stepwise_feedback/run_formal.sh
@@ -111,10 +111,11 @@ sbatch hidden_only/run_formal.sbatch
   ALFWorld turn 中，学生先生成原始 response，teacher 通过 vLLM 给出反馈，学生重新生成，
   环境执行重写后的动作，并在重写后的 response 上计算 hidden loss。正式配置同样为
   150 steps、每 10 steps 保存、每 5 steps 评估。
-- `stepwise_feedback/run_formal.sh`：简洁的 Slurm 提交入口，会自动提交同目录下的
-  `run_formal.sbatch`。
-- `stepwise_feedback/run_formal.sh`：面向复现者的简洁入口，会自动提交同目录下的
-  `run_formal.sbatch`。它需要在 Slurm 集群上运行。
+- `stepwise_feedback/run_formal.sh`：非 Slurm 环境的直接运行入口。它用 Bash 执行同目录
+  下的 `run_formal.sbatch`；其中的 `#SBATCH` 行会被 Bash 当作注释，不需要 Slurm。
+  正式配置默认使用 4 张 GPU。
+- `stepwise_feedback/run_formal.sbatch`：与上述 `.sh` 使用完全相同的正式配置；在 Slurm
+  集群上可以用 `sbatch` 提交，也可以像普通 Bash 脚本一样直接执行。
 - `bridge_bank/`：bridge bank 构建脚本，不是训练入口；已有的 rank-64 bank 位于
   `artifacts/bridge_bank/ps_bank.pt`。
 
