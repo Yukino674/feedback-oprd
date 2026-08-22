@@ -19,6 +19,7 @@ ALFWORLD_DATA="${ALFWORLD_DATA:-$HOME/data/alfworld}"
 CONDA_ENV="${CONDA_ENV:-atod-oprd}"
 CONDA_SH="${CONDA_SH:-/path/to/miniconda3/etc/profile.d/conda.sh}"
 WANDB_MODE="${WANDB_MODE:-online}"
+WANDB_API_KEY="${WANDB_API_KEY:-}"
 
 # These files are included in the repository after `git lfs pull`.
 # Change them only when using external copies.
@@ -31,8 +32,11 @@ if [[ ! -f "$CONDA_SH" ]]; then
     echo "Could not find conda.sh. Set CONDA_SH to your Conda profile script." >&2
     exit 2
 fi
+# Some Conda CUDA activation hooks reference optional variables under nounset.
+set +u
 source "$CONDA_SH"
-conda activate "${CONDA_ENV:-atod-oprd}"
+conda activate "$CONDA_ENV"
+set -u
 cd "$repo_root"
 
 run_root="${RUN_ROOT:-$repo_root/runs}"
@@ -40,12 +44,17 @@ run_id="${RUN_ID:-manual}"
 export TMPDIR="${TMPDIR:-$run_root/tmp_sfbvllm_formal150_$run_id}"
 export TEMP="$TMPDIR"
 export TMP="$TMPDIR"
-export RAY_TMPDIR="${RAY_TMPDIR:-$run_root/ray_sfbvllm_formal150_$run_id}"
+# Ray appends a session directory and Unix socket names here. Keep the default
+# short enough that the resulting AF_UNIX socket path stays below Linux's limit.
+export RAY_TMPDIR="${RAY_TMPDIR:-/tmp/raysfb_${run_id}_$$}"
 export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
 export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME}"
 export PYTHONPATH="$repo_root:${PYTHONPATH:-}"
 export ALFWORLD_DATA
 export WANDB_MODE
+if [[ -n "$WANDB_API_KEY" ]]; then
+    export WANDB_API_KEY
+fi
 unset ROCR_VISIBLE_DEVICES
 
 mkdir -p "$TMPDIR" "$RAY_TMPDIR" "$HF_HOME"
@@ -146,7 +155,7 @@ python3 -m verl.trainer.main_sod_oprd_bridge_stepwise_feedback \
     trainer.critic_warmup=0 \
     'trainer.logger=["console","wandb"]' \
     trainer.project_name=verl_agent_alfworld \
-    trainer.experiment_name=sod_oprd_bridge_stepwise_feedback_vllm_feedback_formal150_save10_eval5_4gpu \
+    trainer.experiment_name=sod_oprd_bridge_stepwise_feedback_vllm_feedback_formal150_save10_eval5_8gpu \
     trainer.n_gpus_per_node=8 \
     trainer.ray_wait_register_center_timeout=600 \
     trainer.nnodes=1 \
@@ -155,4 +164,5 @@ python3 -m verl.trainer.main_sod_oprd_bridge_stepwise_feedback \
     trainer.val_before_train=True \
     trainer.resume_mode=auto \
     trainer.total_epochs=150 \
-    trainer.total_training_steps=150
+    trainer.total_training_steps=150 \
+    "$@"
