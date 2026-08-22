@@ -53,6 +53,8 @@ export ALFWORLD_DATA=/path/to/alfworld
 
 ## 安装环境
 
+复现者可以先阅读[快速开始](QUICKSTART.md)。
+
 在仓库根目录执行：
 
 ```bash
