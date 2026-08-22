@@ -1,0 +1,778 @@
+# Copyright 2024 Bytedance Ltd. and/or its affiliates
+# Copyright 2023-2024 SGLang Team
+# Copyright 2025 ModelBest Inc. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""
+Single Process Actor
+"""
+
+import itertools
+import time
+import logging
+import os
+from typing import Tuple
+
+import torch
+import torch.nn.functional as F
+from torch import nn
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
+import verl.utils.torch_functional as verl_F
+from verl import DataProto
+from verl.trainer.ppo.core_algos import agg_loss, compute_policy_loss, compute_policy_loss_gspo, kl_penalty
+from verl.utils.debug import GPUMemoryLogger
+from verl.utils.device import get_device_name, get_torch_device, is_cuda_available, is_npu_available
+from verl.utils.fsdp_utils import FSDPModule, fsdp2_clip_grad_norm_
+from verl.utils.py_functional import append_to_dict
+from verl.utils.seqlen_balancing import get_reverse_idx, rearrange_micro_batches
+from verl.utils.torch_functional import logprobs_from_logits
+from verl.utils.ulysses import gather_outpus_and_unpad, ulysses_pad_and_slice_inputs, ulysses_pad
+from verl.workers.actor import BasePPOActor
+
+if is_cuda_available:
+    from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
+elif is_npu_available:
+    from transformers.integrations.npu_flash_attention import index_first_axis, pad_input, rearrange, unpad_input
+
+
+__all__ = ["DataParallelPPOActor"]
+
+logger = logging.getLogger(__file__)
+logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
+
+
+class DataParallelPPOActor(BasePPOActor):
+    def __init__(self, config, actor_module: nn.Module, actor_optimizer: torch.optim.Optimizer = None):
+        """When optimizer is None, it is Reference Policy"""
+        super().__init__(config)
+        self.actor_module = actor_module
+        self.actor_optimizer = actor_optimizer
+
+        self.use_remove_padding = self.config.get("use_remove_padding", False)
+        print(f"Actor use_remove_padding={self.use_remove_padding}")
+        self.use_fused_kernels = self.config.get("use_fused_kernels", False)
+        print(f"Actor use_fused_kernels={self.use_fused_kernels}")
+        self._oprd_bridge_bank_cache = {}
+
+        self.ulysses_sequence_parallel_size = self.config.ulysses_sequence_parallel_size
+        self.use_ulysses_sp = self.ulysses_sequence_parallel_size > 1
+
+        self.compute_entropy_from_logits = (
+            torch.compile(verl_F.entropy_from_logits, dynamic=True)
+            if self.config.get("use_torch_compile", True)  #  use torch compile by default
+            else verl_F.entropy_from_logits
+        )
+        self.device_name = get_device_name()
+
+    def _get_oprd_bridge_bank(self, checkpoint_path: str, device: torch.device, dtype: torch.dtype) -> dict:
+        cache_key = (checkpoint_path, str(device), str(dtype))
+        if cache_key in self._oprd_bridge_bank_cache:
+            return self._oprd_bridge_bank_cache[cache_key]
+
+        try:
+            checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        except TypeError:
+            checkpoint = torch.load(checkpoint_path, map_location="cpu")
+
+        layer_pairs = [
+            (int(pair["student_layer"]), int(pair["teacher_layer"]))
+            for pair in checkpoint["layer_pairs"]
+        ]
+        state_dict = checkpoint.get("state_dict", {})
+        frozen_weights = checkpoint.get("frozen_pt_weights", {})
+        frozen_means = checkpoint.get("frozen_pt_means", {})
+
+        student_weights = []
+        teacher_weights = []
+        teacher_means = []
+        for student_layer_idx, teacher_layer_idx in layer_pairs:
+            key = f"s{student_layer_idx}_t{teacher_layer_idx}"
+            ps = state_dict.get(f"projectors.{key}.weight")
+            pt = frozen_weights.get(key)
+            mu = frozen_means.get(key)
+            if ps is None or pt is None or mu is None:
+                raise RuntimeError(f"OPRD-Bridge bank is missing entries for {key}")
+            student_weights.append(ps.to(device=device, dtype=dtype))
+            teacher_weights.append(pt.to(device=device, dtype=dtype))
+            teacher_means.append(mu.to(device=device, dtype=dtype))
+
+        bank = {
+            "rank": int(checkpoint.get("rank", student_weights[0].shape[0])),
+            "layer_pairs": layer_pairs,
+            "student_weights": student_weights,
+            "teacher_weights": teacher_weights,
+            "teacher_means": teacher_means,
+        }
+        self._oprd_bridge_bank_cache[cache_key] = bank
+        return bank
+
+    def _oprd_bridge_get_response_mask(self, micro_batch, response_len: int) -> torch.Tensor:
+        if "response_mask" in micro_batch.keys():
+            response_mask = micro_batch["response_mask"]
+        elif "loss_mask" in micro_batch.keys():
+            response_mask = micro_batch["loss_mask"][:, -response_len:]
+        else:
+            response_mask = micro_batch["attention_mask"][:, -response_len:]
+        return response_mask
+
+    def _oprd_bridge_get_response_selection(self, micro_batch, response_len: int, response_last_k: int):
+        response_mask = self._oprd_bridge_get_response_mask(micro_batch, response_len)
+        if response_last_k <= 0 or response_last_k >= response_len:
+            return None, response_mask
+
+        batch_size = response_mask.size(0)
+        selected_idx = torch.zeros(batch_size, response_last_k, dtype=torch.long, device=response_mask.device)
+        selected_mask = torch.zeros(batch_size, response_last_k, dtype=response_mask.dtype, device=response_mask.device)
+        all_positions = torch.arange(response_len, device=response_mask.device)
+        valid_mask = response_mask > 0
+        for row in range(batch_size):
+            valid_positions = all_positions[valid_mask[row]]
+            if valid_positions.numel() == 0:
+                continue
+            tail_positions = valid_positions[-response_last_k:]
+            offset = response_last_k - tail_positions.numel()
+            selected_idx[row, offset:] = tail_positions
+            selected_mask[row, offset:] = response_mask[row, tail_positions]
+        return selected_idx, selected_mask
+
+    def _oprd_bridge_layer_indices(self, bank: dict) -> list[int]:
+        layer_count = len(bank["layer_pairs"])
+        layer_stride = int(self.config.get("oprd_bridge_layer_stride", 1))
+        max_layer_pairs = int(self.config.get("oprd_bridge_max_layer_pairs", 0))
+        if layer_stride <= 0:
+            raise RuntimeError(f"oprd_bridge_layer_stride must be positive, got {layer_stride}")
+        indices = list(range(layer_count))[::layer_stride]
+        if max_layer_pairs > 0:
+            indices = indices[-max_layer_pairs:]
+        if not indices:
+            raise RuntimeError("OPRD-Bridge layer selection produced no layer pairs")
+        return indices
+
+    def _oprd_bridge_project_micro_batch(
+        self,
+        micro_batch,
+        *,
+        checkpoint_path: str,
+        mode: str,
+        return_mask: bool = False,
+    ):
+        """Project response-token hidden states with an OPRD-Bridge bank.
+
+        Returns [batch, paired_layers, response_len, rank] or, when
+        ``return_mask`` is True, ``(projected, response_mask)``.
+        """
+
+        if mode not in {"student", "teacher"}:
+            raise ValueError(f"mode must be 'student' or 'teacher', got {mode!r}")
+
+        input_ids = micro_batch["input_ids"]
+        attention_mask = micro_batch["attention_mask"]
+        position_ids = micro_batch["position_ids"]
+        response_len = int(micro_batch["responses"].size(-1))
+        response_last_k = int(self.config.get("oprd_bridge_response_last_k", 0))
+
+        batch_size, seqlen = input_ids.shape
+        use_rmpad = (
+            self.use_remove_padding
+            and not self.use_ulysses_sp
+            and position_ids.dim() != 3
+        )
+
+        with torch.autocast(device_type=self.device_name, dtype=torch.bfloat16):
+            if use_rmpad:
+                input_ids_rmpad, indices, *_ = unpad_input(input_ids.unsqueeze(-1), attention_mask)
+                input_ids_rmpad = input_ids_rmpad.transpose(0, 1)
+                position_ids_rmpad = index_first_axis(
+                    rearrange(position_ids.unsqueeze(-1), "b s ... -> (b s) ..."),
+                    indices,
+                ).transpose(0, 1)
+                outputs = self.actor_module(
+                    input_ids=input_ids_rmpad,
+                    attention_mask=None,
+                    position_ids=position_ids_rmpad,
+                    output_hidden_states=True,
+                    use_cache=False,
+                )
+            else:
+                if position_ids.dim() == 3:
+                    position_ids = position_ids.transpose(0, 1)
+                outputs = self.actor_module(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    position_ids=position_ids,
+                    output_hidden_states=True,
+                    use_cache=False,
+                )
+
+        hidden_states = outputs.hidden_states[1:]
+        dtype = hidden_states[-1].dtype
+        bank = self._get_oprd_bridge_bank(checkpoint_path, input_ids.device, dtype)
+
+        def slice_response_hidden(layer_hidden: torch.Tensor) -> torch.Tensor:
+            if use_rmpad:
+                layer_hidden = pad_input(
+                    hidden_states=layer_hidden.squeeze(0),
+                    indices=indices,
+                    batch=batch_size,
+                    seqlen=seqlen,
+                )
+            return layer_hidden[:, -response_len:, :]
+        selected_idx, selected_mask = self._oprd_bridge_get_response_selection(
+            micro_batch,
+            response_len=response_len,
+            response_last_k=response_last_k,
+        )
+
+        projected = []
+        for pair_idx in self._oprd_bridge_layer_indices(bank):
+            student_layer_idx, teacher_layer_idx = bank["layer_pairs"][pair_idx]
+            if mode == "student":
+                layer_idx = student_layer_idx
+                if layer_idx >= len(hidden_states):
+                    raise RuntimeError(
+                        f"Student layer {layer_idx} is out of range for {len(hidden_states)} layers"
+                    )
+                h = slice_response_hidden(hidden_states[layer_idx])
+                if selected_idx is not None:
+                    h = torch.gather(h, dim=1, index=selected_idx[:, :, None].expand(-1, -1, h.size(-1)))
+                weight = bank["student_weights"][pair_idx]
+                z = F.linear(h, weight)
+            else:
+                layer_idx = teacher_layer_idx
+                if layer_idx >= len(hidden_states):
+                    raise RuntimeError(
+                        f"Teacher layer {layer_idx} is out of range for {len(hidden_states)} layers"
+                    )
+                h = slice_response_hidden(hidden_states[layer_idx])
+                if selected_idx is not None:
+                    h = torch.gather(h, dim=1, index=selected_idx[:, :, None].expand(-1, -1, h.size(-1)))
+                weight = bank["teacher_weights"][pair_idx]
+                mean = bank["teacher_means"][pair_idx]
+                z = F.linear(h - mean.to(h.dtype), weight)
+            projected.append(z)
+
+        projected = torch.stack(projected, dim=1)
+        if return_mask:
+            return projected, selected_mask
+        return projected
+
+    def compute_oprd_bridge_hidden(self, data: DataProto, *, checkpoint_path: str, mode: str):
+        self.actor_module.eval()
+
+        micro_batch_size = int(data.meta_info["micro_batch_size"])
+        use_dynamic_bsz = bool(data.meta_info.get("use_dynamic_bsz", False))
+        select_keys = ["responses", "input_ids", "attention_mask", "position_ids"]
+        for optional_key in ("response_mask", "loss_mask"):
+            if optional_key in data.batch.keys():
+                select_keys.append(optional_key)
+        batch = data.select(batch_keys=select_keys).batch
+
+        if use_dynamic_bsz:
+            max_token_len = data.meta_info["max_token_len"] * self.ulysses_sequence_parallel_size
+            micro_batches, indices = rearrange_micro_batches(batch=batch, max_token_len=max_token_len)
+        else:
+            micro_batches = batch.split(micro_batch_size)
+
+        hidden_lst = []
+        mask_lst = []
+        for micro_batch in micro_batches:
+            with torch.no_grad():
+                hidden, selected_mask = self._oprd_bridge_project_micro_batch(
+                    micro_batch,
+                    checkpoint_path=checkpoint_path,
+                    mode=mode,
+                    return_mask=True,
+                )
+            hidden_lst.append(hidden.detach().to(torch.float16))
+            mask_lst.append(selected_mask.detach().to(torch.bool))
+
+        hidden = torch.concat(hidden_lst, dim=0)
+        selected_mask = torch.concat(mask_lst, dim=0)
+        if use_dynamic_bsz:
+            indices = list(itertools.chain.from_iterable(indices))
+            assert len(indices) == hidden.size(0), f"{len(indices)} vs. {hidden.size()}"
+            revert_indices = torch.tensor(get_reverse_idx(indices), dtype=torch.long, device=hidden.device)
+            hidden = hidden[revert_indices]
+            selected_mask = selected_mask[revert_indices]
+        return hidden, selected_mask
+
+    def _oprd_bridge_hidden_loss(
+        self,
+        micro_batch,
+        *,
+        checkpoint_path: str,
+        coef: float,
+        eps: float = 1e-6,
+    ) -> tuple[torch.Tensor, dict]:
+        student_repr, selected_mask = self._oprd_bridge_project_micro_batch(
+            micro_batch,
+            checkpoint_path=checkpoint_path,
+            mode="student",
+            return_mask=True,
+        )
+        teacher_repr = micro_batch["teacher_oprd_bridge_repr"].to(
+            device=student_repr.device,
+            dtype=student_repr.dtype,
+        )
+        if teacher_repr.shape != student_repr.shape:
+            raise RuntimeError(
+                "OPRD-Bridge hidden target shape mismatch: "
+                f"student={tuple(student_repr.shape)} teacher={tuple(teacher_repr.shape)}"
+            )
+
+        student_norm = F.normalize(student_repr.float(), p=2, dim=-1, eps=eps)
+        teacher_norm = F.normalize(teacher_repr.float(), p=2, dim=-1, eps=eps)
+        per_token_loss = ((student_norm - teacher_norm) ** 2).mean(dim=-1).mean(dim=1)
+        if "teacher_oprd_bridge_mask" in micro_batch.keys():
+            mask = micro_batch["teacher_oprd_bridge_mask"]
+        else:
+            mask = selected_mask
+        mask = mask.to(per_token_loss.device, dtype=per_token_loss.dtype)
+        loss = (per_token_loss * mask).sum() / mask.sum().clamp_min(eps)
+        scaled = loss * float(coef)
+        with torch.no_grad():
+            valid = mask.bool()
+            metrics = {
+                "actor/oprd_bridge_hidden_loss": float(loss.detach().item()),
+                "actor/oprd_bridge_hidden_loss_scaled": float(scaled.detach().item()),
+                "actor/oprd_bridge_hidden_coef": float(coef),
+                "actor/oprd_bridge_hidden_tokens": float(mask.sum().detach().item()),
+                "actor/oprd_bridge_hidden_mean": float(per_token_loss[valid].mean().detach().item())
+                if valid.any()
+                else 0.0,
+            }
+        return scaled, metrics
+
+    def _forward_micro_batch(self, micro_batch, temperature, calculate_entropy=False) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Returns:
+            entropy: # (bs, response_len)
+            log_probs: # (bs, response_len)
+        """
+        response_length = micro_batch["responses"].size(-1)
+        multi_modal_inputs = {}
+        if "multi_modal_inputs" in micro_batch:
+            for key in micro_batch["multi_modal_inputs"][0].keys():
+                multi_modal_inputs[key] = torch.cat([inputs[key] for inputs in micro_batch["multi_modal_inputs"]], dim=0)
+
+        with torch.autocast(device_type=self.device_name, dtype=torch.bfloat16):
+            input_ids = micro_batch["input_ids"]
+            batch_size, seqlen = input_ids.shape
+            attention_mask = micro_batch["attention_mask"]
+            position_ids = micro_batch["position_ids"]
+            entropy = None
+            if position_ids.dim() == 3:  # qwen2vl mrope
+                position_ids = position_ids.transpose(0, 1)  # (bsz, 4, seqlen) -> (4, bsz, seqlen)
+
+            if self.use_remove_padding:
+                input_ids_rmpad, indices, *_ = unpad_input(input_ids.unsqueeze(-1), attention_mask)  # input_ids_rmpad (total_nnz, ...)
+                input_ids_rmpad = input_ids_rmpad.transpose(0, 1)  # (1, total_nnz)
+
+                # unpad the position_ids to align the rotary
+                if position_ids.dim() == 3:
+                    position_ids_rmpad = index_first_axis(rearrange(position_ids, "c b s ... -> (b s) c ..."), indices).transpose(0, 1).unsqueeze(1)  # (4, bsz, seqlen) -> (4, 1, bsz * seqlen)
+                else:
+                    position_ids_rmpad = index_first_axis(rearrange(position_ids.unsqueeze(-1), "b s ... -> (b s) ..."), indices).transpose(0, 1)
+
+                # for compute the log_prob
+                input_ids_rmpad_rolled = torch.roll(input_ids_rmpad, shifts=-1, dims=1)  # (1, total_nnz)
+
+                # pad and slice the inputs if sp > 1
+                if self.use_ulysses_sp:
+                    is_vlm_model = "multi_modal_inputs" in micro_batch
+                    if is_vlm_model:
+                        # vlm model's inputs will be sliced after embedding
+                        input_ids_rmpad, position_ids_rmpad, pad_size = ulysses_pad(
+                            input_ids_rmpad,
+                            position_ids_rmpad=position_ids_rmpad,
+                            sp_size=self.ulysses_sequence_parallel_size,
+                        )
+                    else:
+                        input_ids_rmpad, position_ids_rmpad, pad_size = ulysses_pad_and_slice_inputs(
+                            input_ids_rmpad,
+                            position_ids_rmpad=position_ids_rmpad,
+                            sp_size=self.ulysses_sequence_parallel_size,
+                        )
+                    input_ids_rmpad_rolled, _, _ = ulysses_pad_and_slice_inputs(
+                        input_ids_rmpad_rolled,
+                        position_ids_rmpad=None,
+                        sp_size=self.ulysses_sequence_parallel_size,
+                    )
+
+                input_ids_rmpad_rolled = input_ids_rmpad_rolled.squeeze(0)  # ((total_nnz / sp) + pad)
+
+                # only pass input_ids and position_ids to enable flash_attn_varlen
+                extra_args = {}
+                if self.use_fused_kernels:
+                    extra_args["temperature"] = temperature
+                    extra_args["return_dict"] = True
+
+                output = self.actor_module(
+                    input_ids=input_ids_rmpad,
+                    attention_mask=None,
+                    position_ids=position_ids_rmpad,
+                    **multi_modal_inputs,
+                    use_cache=False,
+                    **extra_args,
+                )  # prevent model thinks we are generating
+
+                if self.use_fused_kernels:
+                    log_probs = output.log_probs.squeeze(0)  # (total_nnz,)
+                    entropy_rmpad = output.entropy.squeeze(0)  # (total_nnz,)
+                else:
+                    logits_rmpad = output.logits.squeeze(0)  # (total_nnz, vocab_size)
+                    logits_rmpad.div_(temperature)
+
+                    # if use_sp: ((total_nnz / sp) + pad) ; if not use_sp: (batch, seqlen)
+                    inplace_backward = True
+                    if calculate_entropy:
+                        inplace_backward = False
+                    log_probs = logprobs_from_logits(
+                        logits=logits_rmpad,
+                        labels=input_ids_rmpad_rolled,
+                        inplace_backward=inplace_backward,
+                    )
+
+                    # compute entropy
+                    if calculate_entropy:
+                        entropy_rmpad = self.compute_entropy_from_logits(logits_rmpad)  # ((total_nnz / sp) + pad)
+
+                # gather log_prob if sp > 1
+                if self.use_ulysses_sp:
+                    # gather and unpad for the ulysses sp
+                    log_probs = gather_outpus_and_unpad(
+                        log_probs,
+                        gather_dim=0,
+                        unpad_dim=0,
+                        padding_size=pad_size,
+                    )
+                    if calculate_entropy:
+                        entropy_rmpad = gather_outpus_and_unpad(
+                            entropy_rmpad,
+                            gather_dim=0,
+                            unpad_dim=0,
+                            padding_size=pad_size,
+                        )
+                # pad back to (bsz, seqlen)
+                if calculate_entropy:
+                    full_entropy = pad_input(
+                        hidden_states=entropy_rmpad.unsqueeze(-1),
+                        indices=indices,
+                        batch=batch_size,
+                        seqlen=seqlen,
+                    )
+                full_log_probs = pad_input(
+                    hidden_states=log_probs.unsqueeze(-1),
+                    indices=indices,
+                    batch=batch_size,
+                    seqlen=seqlen,
+                )
+
+                # only return response part:
+                if calculate_entropy:
+                    entropy = full_entropy.squeeze(-1)[:, -response_length - 1 : -1]  # (bsz, response_length)
+                log_probs = full_log_probs.squeeze(-1)[:, -response_length - 1 : -1]  # (bsz, response_length)
+
+            else:  # not using rmpad and no ulysses sp
+                extra_args = {}
+                if self.use_fused_kernels:
+                    extra_args["temperature"] = temperature
+                output = self.actor_module(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    position_ids=position_ids,
+                    **multi_modal_inputs,
+                    use_cache=False,
+                    **extra_args,
+                )  # prevent model thinks we are generating
+
+                if self.use_fused_kernels:
+                    log_probs = output.log_probs[:, -response_length - 1 : -1]
+                    entropy = output.entropy[:, -response_length - 1 : -1]  # (bsz, response_length)
+
+                else:
+                    logits = output.logits
+
+                    logits.div_(temperature)
+                    logits = logits[:, -response_length - 1 : -1, :]  # (bsz, response_length, vocab_size)
+                    log_probs = logprobs_from_logits(logits, micro_batch["responses"])
+                    if calculate_entropy:
+                        entropy = verl_F.entropy_from_logits(logits)  # (bsz, response_length)
+
+            return entropy, log_probs
+
+    def _optimizer_step(self):
+        assert self.config.grad_clip is not None
+
+        if isinstance(self.actor_module, FSDP):
+            grad_norm = self.actor_module.clip_grad_norm_(max_norm=self.config.grad_clip)
+        elif isinstance(self.actor_module, FSDPModule):
+            grad_norm = fsdp2_clip_grad_norm_(self.actor_module.parameters(), max_norm=self.config.grad_clip)
+        else:
+            grad_norm = torch.nn.utils.clip_grad_norm_(self.actor_module.parameters(), max_norm=self.config.grad_clip)
+
+        # if grad_norm is not finite, skip the update
+        if not torch.isfinite(grad_norm):
+            print(f"WARN: rank {torch.distributed.get_rank()} grad_norm is not finite: {grad_norm}")
+            self.actor_optimizer.zero_grad()
+        else:
+            self.actor_optimizer.step()
+        return grad_norm
+
+    @GPUMemoryLogger(role="dp actor", logger=logger)
+    def compute_log_prob(self, data: DataProto, calculate_entropy=False) -> torch.Tensor:
+        """Compute the log probability of the responses given input_ids, attention_mask and position_ids
+
+        Args:
+            data (DataProto): a DataProto containing keys
+
+                ``input_ids``: tensor of shape [batch_size, sequence_length]. torch.int64. Note that input_ids is the
+                concatenation of prompt and response. Note that ``sequence_length = prompt_length + response_length``.
+
+                ``attention_mask``: tensor of shape [batch_size, sequence_length]. torch.int64.
+
+                ``position_ids``: tensor of shape [batch_size, sequence_length]. torch.int64.
+
+                ``responses``:  tensor of shape [batch_size, response_length]. torch.int64.
+
+        Returns:
+            torch.Tensor: the log_prob tensor
+        """
+        # set to eval
+        self.actor_module.eval()
+
+        micro_batch_size = data.meta_info["micro_batch_size"]
+        temperature = data.meta_info["temperature"]  # temperature must be in the data.meta_info to avoid silent error
+        use_dynamic_bsz = data.meta_info["use_dynamic_bsz"]
+
+        select_keys = ["responses", "input_ids", "attention_mask", "position_ids"]
+        batch = data.select(batch_keys=select_keys).batch
+        has_multi_modal_inputs = "multi_modal_inputs" in data.non_tensor_batch.keys()
+
+        if has_multi_modal_inputs:
+            num_micro_batches = data.batch.batch_size[0] // micro_batch_size
+            non_tensor_select_keys = ["multi_modal_inputs"]
+            micro_batches = data.select(select_keys, non_tensor_select_keys).chunk(num_micro_batches)
+        elif use_dynamic_bsz:
+            # split using dynamic bsz
+            max_token_len = data.meta_info["max_token_len"] * self.ulysses_sequence_parallel_size
+            micro_batches, indices = rearrange_micro_batches(batch=batch, max_token_len=max_token_len)
+        else:
+            micro_batches = batch.split(micro_batch_size)
+
+        log_probs_lst = []
+        entropy_lst = []
+        for micro_batch in micro_batches:
+            if isinstance(micro_batch, DataProto):
+                micro_batch = {**micro_batch.batch, **micro_batch.non_tensor_batch}
+            with torch.no_grad():
+                entropy, log_probs = self._forward_micro_batch(micro_batch, temperature=temperature, calculate_entropy=calculate_entropy)
+            log_probs_lst.append(log_probs)
+            if calculate_entropy:
+                entropy_lst.append(entropy)
+
+        log_probs = torch.concat(log_probs_lst, dim=0)
+        entropys = None
+        if calculate_entropy:
+            entropys = torch.concat(entropy_lst, dim=0)
+        if use_dynamic_bsz:
+            indices = list(itertools.chain.from_iterable(indices))
+            assert len(indices) == log_probs.size(0), f"{len(indices)} vs. {log_probs.size()}"
+            revert_indices = torch.tensor(get_reverse_idx(indices), dtype=torch.long)
+            log_probs = log_probs[revert_indices]
+
+        return log_probs, entropys
+
+    @GPUMemoryLogger(role="dp actor", logger=logger)
+    def update_policy(self, data: DataProto):
+        # make sure we are in training mode
+        self.actor_module.train()
+
+        temperature = data.meta_info["temperature"]  # temperature must be in the data.meta_info to avoid silent error
+        multi_turn = data.meta_info.get("multi_turn", False)
+
+        select_keys = ["responses", "input_ids", "attention_mask", "position_ids", "old_log_probs", "advantages"]
+        if multi_turn:
+            select_keys.append("loss_mask")
+        if self.config.use_kl_loss:
+            select_keys.append("ref_log_prob")
+        if self.config.get("use_sdl_loss", False) or self.config.get("use_sdar_loss", False):
+            select_keys.append("teacher_log_probs")
+        if self.config.get("use_oprd_bridge_hidden_loss", False):
+            select_keys.append("teacher_oprd_bridge_repr")
+        batch = data.select(batch_keys=select_keys).batch
+        has_multi_modal_inputs = "multi_modal_inputs" in data.non_tensor_batch.keys()
+
+        # Split to make minibatch iterator for updating the actor
+        # See PPO paper for details. https://arxiv.org/abs/1707.06347
+        if has_multi_modal_inputs:
+            num_mini_batches = data.batch.batch_size[0] // self.config.ppo_mini_batch_size
+            non_tensor_select_keys = ["multi_modal_inputs"]
+            dataloader = data.select(select_keys, non_tensor_select_keys).chunk(num_mini_batches)
+        else:
+            dataloader = batch.split(self.config.ppo_mini_batch_size)
+
+        metrics = {}
+        for epoch in range(self.config.ppo_epochs):
+            for batch_idx, data in enumerate(dataloader):
+                # split batch into micro_batches
+                mini_batch = data
+                if has_multi_modal_inputs:
+                    self.gradient_accumulation = self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
+                    num_micro_batches = mini_batch.batch.batch_size[0] // self.config.ppo_micro_batch_size_per_gpu
+                    micro_batches = data.select(select_keys, non_tensor_select_keys).chunk(num_micro_batches)
+                elif self.config.use_dynamic_bsz:
+                    max_token_len = self.config.ppo_max_token_len_per_gpu * self.ulysses_sequence_parallel_size
+                    micro_batches, _ = rearrange_micro_batches(batch=mini_batch, max_token_len=max_token_len)
+                else:
+                    self.gradient_accumulation = self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
+                    # split batch into micro_batches
+                    micro_batches = mini_batch.split(self.config.ppo_micro_batch_size_per_gpu)
+
+                self.actor_optimizer.zero_grad()
+
+                for data in micro_batches:
+                    # Support all hardwares
+                    if isinstance(data, DataProto):
+                        data = {**data.batch.to(get_torch_device().current_device()), **data.non_tensor_batch}
+                    else:
+                        data = data.to(get_torch_device().current_device())  # actor device is cpu when using offload
+                    responses = data["responses"]
+                    response_length = responses.size(1)
+                    attention_mask = data["attention_mask"]
+                    if multi_turn:
+                        response_mask = data["loss_mask"][:, -response_length:]
+                    else:
+                        response_mask = attention_mask[:, -response_length:]
+
+                    old_log_prob = data["old_log_probs"]
+                    advantages = data["advantages"]
+
+                    clip_ratio = self.config.clip_ratio
+                    clip_ratio_low = self.config.clip_ratio_low if self.config.clip_ratio_low is not None else clip_ratio
+                    clip_ratio_high = self.config.clip_ratio_high if self.config.clip_ratio_high is not None else clip_ratio
+                    clip_ratio_c = self.config.get("clip_ratio_c", 3.0)
+                    entropy_coeff = self.config.entropy_coeff
+                    loss_agg_mode = self.config.loss_agg_mode
+
+                    # all return: (bsz, response_length)
+                    calculate_entropy = False
+                    if entropy_coeff != 0:
+                        calculate_entropy = True
+                    entropy, log_prob = self._forward_micro_batch(micro_batch=data, temperature=temperature, calculate_entropy=calculate_entropy)
+                    
+                    loss_mode = self.config.policy_loss.get("loss_mode", "vanilla")
+                    if loss_mode == "vanilla":
+                        policy_loss_fn = compute_policy_loss
+                    elif loss_mode == "gspo":
+                        policy_loss_fn = compute_policy_loss_gspo
+                    else:
+                        raise ValueError(f"Unsupported loss_mode: {loss_mode}")
+
+                    pg_loss, pg_clipfrac, ppo_kl, pg_clipfrac_lower = policy_loss_fn(
+                        old_log_prob=old_log_prob,
+                        log_prob=log_prob,
+                        advantages=advantages,
+                        response_mask=response_mask,
+                        cliprange=clip_ratio,
+                        cliprange_low=clip_ratio_low,
+                        cliprange_high=clip_ratio_high,
+                        clip_ratio_c=clip_ratio_c,
+                        loss_agg_mode=loss_agg_mode,
+                    )
+
+                    pg_loss_coef = self.config.get("pg_loss_coef", 1.0)
+                    if entropy_coeff != 0:
+                        entropy_loss = agg_loss(loss_mat=entropy, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+
+                        # compute policy loss
+                        policy_loss = pg_loss * pg_loss_coef - entropy_loss * entropy_coeff
+                    else:
+                        policy_loss = pg_loss * pg_loss_coef
+
+                    if self.config.use_kl_loss:
+                        ref_log_prob = data["ref_log_prob"]
+                        # compute kl loss
+                        kld = kl_penalty(logprob=log_prob, ref_logprob=ref_log_prob, kl_penalty=self.config.kl_loss_type)
+                        kl_loss = agg_loss(loss_mat=kld, loss_mask=response_mask, loss_agg_mode=loss_agg_mode)
+
+                        policy_loss = policy_loss + kl_loss * self.config.kl_loss_coef
+                        metrics["actor/kl_loss"] = kl_loss.detach().item()
+                        metrics["actor/kl_coef"] = self.config.kl_loss_coef
+
+                    if self.config.get("use_sdl_loss", False):
+                        from verl.trainer.ppo.skillsd_utils import compute_sdl_loss
+                        teacher_log_probs = data["teacher_log_probs"]
+                        sdl_loss = compute_sdl_loss(
+                            student_log_probs=log_prob,
+                            teacher_log_probs=teacher_log_probs,
+                            old_log_probs=old_log_prob,
+                            response_mask=response_mask,
+                            loss_agg_mode=loss_agg_mode,
+                        )
+                        sdl_coef = self.config.get("sdl_loss_coef", 0.1)
+                        policy_loss = policy_loss + sdl_loss * sdl_coef
+                        metrics["actor/sdl_loss"] = sdl_loss.detach().item()
+                        metrics["actor/sdl_coef"] = sdl_coef
+
+                    if self.config.get("use_sdar_loss", False):
+                        from verl.trainer.ppo.sdar_utils import compute_sdar_loss
+                        teacher_log_probs = data["teacher_log_probs"]
+                        sdar_loss, sdar_metrics = compute_sdar_loss(
+                            student_log_probs=log_prob,
+                            teacher_log_probs=teacher_log_probs,
+                            response_mask=response_mask,
+                            gate_beta=self.config.get("sdar_gate_beta", 5.0),
+                            loss_agg_mode=loss_agg_mode,
+                        )
+                        sdar_coef = self.config.get("sdar_loss_coef", 0.1)
+                        policy_loss = policy_loss + sdar_loss * sdar_coef
+                        metrics.update(sdar_metrics)
+                        metrics["sdar/coef"] = sdar_coef
+
+                    if self.config.get("use_oprd_bridge_hidden_loss", False):
+                        bridge_path = self.config.get("oprd_bridge_checkpoint_path", "")
+                        if not bridge_path:
+                            raise RuntimeError(
+                                "actor.use_oprd_bridge_hidden_loss=True requires "
+                                "actor.oprd_bridge_checkpoint_path"
+                            )
+                        bridge_loss, bridge_metrics = self._oprd_bridge_hidden_loss(
+                            data,
+                            checkpoint_path=bridge_path,
+                            coef=self.config.get("oprd_bridge_hidden_loss_coef", 1.0),
+                        )
+                        policy_loss = policy_loss + bridge_loss
+                        append_to_dict(metrics, bridge_metrics)
+
+                    if self.config.use_dynamic_bsz:
+                        # relative to the dynamic bsz
+                        loss = policy_loss * (len(data) / self.config.ppo_mini_batch_size)
+                    else:
+                        loss = policy_loss / self.gradient_accumulation
+                    loss.backward()
+
+                    data = {
+                        "actor/pg_loss": pg_loss.detach().item(),
+                        "actor/pg_clipfrac": pg_clipfrac.detach().item(),
+                        "actor/ppo_kl": ppo_kl.detach().item(),
+                        "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
+                    }
+                    append_to_dict(metrics, data)
+
+                grad_norm = self._optimizer_step()
+                data = {"actor/grad_norm": grad_norm.detach().item()}
+                append_to_dict(metrics, data)
+        self.actor_optimizer.zero_grad()
+        return metrics

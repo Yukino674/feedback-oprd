@@ -1,0 +1,31 @@
+# Experiment outputs
+logs/
+results/
+outputs/
+checkpoints/
+runs/
+*.tar.gz
+wandb/
+swanlab/
+*.log
+*.out
+*.err
+
+# Large generated artifacts
+*.pt
+!artifacts/
+!artifacts/bridge_bank/
+!artifacts/bridge_bank/*.pt
+*.pth
+*.safetensors
+*.bin
+*.csv
+*.png
+*.pdf
+
+# Python and editor artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store
