@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+release_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="${ATOD_REPO:-$release_root}"
+
 # ======================== USER SETTINGS ========================
 # Set the two local model directories explicitly.
 STUDENT_MODEL_PATH="${STUDENT_MODEL_PATH:-/path/to/Qwen3-1.7B}"
@@ -17,14 +20,13 @@ CONDA_ENV="${CONDA_ENV:-atod-oprd}"
 CONDA_SH="${CONDA_SH:-/path/to/miniconda3/etc/profile.d/conda.sh}"
 WANDB_MODE="${WANDB_MODE:-online}"
 
-# Optional: override the repository's LFS/downloaded bank and parquet files.
-BRIDGE_BANK_PATH="${BRIDGE_BANK_PATH:-}"
-TRAIN_FILE="${TRAIN_FILE:-}"
-VAL_FILE="${VAL_FILE:-}"
+# These files are included in the repository after `git lfs pull`.
+# Change them only when using external copies.
+BRIDGE_BANK_PATH="${BRIDGE_BANK_PATH:-$repo_root/artifacts/bridge_bank/ps_bank.pt}"
+TRAIN_FILE="${TRAIN_FILE:-$repo_root/data/verl-agent/text/train.parquet}"
+VAL_FILE="${VAL_FILE:-$repo_root/data/verl-agent/text/test.parquet}"
 # ====================== END USER SETTINGS ======================
 
-release_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-repo_root="${ATOD_REPO:-$release_root}"
 if [[ ! -f "$CONDA_SH" ]]; then
     echo "Could not find conda.sh. Set CONDA_SH to your Conda profile script." >&2
     exit 2
@@ -50,9 +52,9 @@ mkdir -p "$TMPDIR" "$RAY_TMPDIR" "$HF_HOME"
 
 student_model_path="$STUDENT_MODEL_PATH"
 teacher_model_path="$TEACHER_MODEL_PATH"
-bridge_bank_path="${BRIDGE_BANK_PATH:-$repo_root/artifacts/bridge_bank/ps_bank.pt}"
-train_file="${TRAIN_FILE:-$repo_root/data/verl-agent/text/train.parquet}"
-val_file="${VAL_FILE:-$repo_root/data/verl-agent/text/test.parquet}"
+bridge_bank_path="$BRIDGE_BANK_PATH"
+train_file="$TRAIN_FILE"
+val_file="$VAL_FILE"
 
 for required_path in "$student_model_path" "$teacher_model_path" "$bridge_bank_path" "$train_file" "$val_file" "$ALFWORLD_DATA"; do
     [[ -e "$required_path" ]] || { echo "Missing required path: $required_path" >&2; exit 2; }
