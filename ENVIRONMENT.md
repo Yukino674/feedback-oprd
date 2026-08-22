@@ -1,7 +1,6 @@
 # 实际训练环境
 
-`environment.yml` 是从服务器当前使用的 `atod-oprd` Conda 环境导出的版本清单，
-不是根据 ATOD 示例猜测的依赖。`requirements_atod_oprd_actual.txt` 是同一环境的
+`environment.yml` 是从服务器当前使用的 `atod-oprd` Conda 环境导出的版本清单。`requirements_atod_oprd_actual.txt` 是同一环境的
 Python pip 包清单，便于排查 Conda 导出或 CUDA 安装问题。
 
 ## 关键版本
@@ -30,5 +29,5 @@ conda activate atod-oprd
 驱动或 GPU 架构不同，应保留 Python 依赖版本，同时按照本机 CUDA 版本调整
 PyTorch、Flash-Attention、xformers 和 vLLM。
 
-原来的仓库环境快照保存在 `environment_atod_upstream.yml`，仅作为对照，不是本实验
+原来的atod仓库环境保存在 `environment_atod_upstream.yml`，仅作为对照，不是本实验
 的推荐安装入口。
