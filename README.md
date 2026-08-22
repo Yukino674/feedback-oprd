@@ -114,7 +114,7 @@ WandB 默认使用 online 模式，需要先登录一次：
 wandb login
 ```
 
-脚本会自动探测常见的 Conda 安装位置；如果仍然找不到 Conda，再设置：
+在脚本顶部的 `USER SETTINGS` 区域填写 Conda 初始化脚本路径：
 
 ```bash
 export CONDA_SH=/path/to/miniconda3/etc/profile.d/conda.sh

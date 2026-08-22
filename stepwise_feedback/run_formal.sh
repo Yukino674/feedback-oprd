@@ -12,9 +12,9 @@ TEACHER_MODEL_PATH="${TEACHER_MODEL_PATH:-/path/to/Qwen3-8B}"
 # Put the raw ALFWorld files here, or change this path.
 ALFWORLD_DATA="${ALFWORLD_DATA:-$HOME/data/alfworld}"
 
-# Conda and logging settings. Change CONDA_ENV if you used another name.
+# Conda and logging settings. Change both Conda values if needed.
 CONDA_ENV="${CONDA_ENV:-atod-oprd}"
-CONDA_SH="${CONDA_SH:-}"
+CONDA_SH="${CONDA_SH:-/path/to/miniconda3/etc/profile.d/conda.sh}"
 WANDB_MODE="${WANDB_MODE:-online}"
 
 # Optional: override the repository's LFS/downloaded bank and parquet files.
@@ -25,24 +25,11 @@ VAL_FILE="${VAL_FILE:-}"
 
 release_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repo_root="${ATOD_REPO:-$release_root}"
-conda_sh="${CONDA_SH:-}"
-if [[ -z "$conda_sh" && -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]]; then
-    conda_sh="$HOME/miniconda3/etc/profile.d/conda.sh"
-fi
-if [[ -z "$conda_sh" && -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]]; then
-    conda_sh="$HOME/anaconda3/etc/profile.d/conda.sh"
-fi
-if [[ -z "$conda_sh" ]] && command -v conda >/dev/null 2>&1; then
-    conda_base="$(conda info --base 2>/dev/null || true)"
-    if [[ -n "$conda_base" && -f "$conda_base/etc/profile.d/conda.sh" ]]; then
-        conda_sh="$conda_base/etc/profile.d/conda.sh"
-    fi
-fi
-if [[ -z "$conda_sh" || ! -f "$conda_sh" ]]; then
+if [[ ! -f "$CONDA_SH" ]]; then
     echo "Could not find conda.sh. Set CONDA_SH to your Conda profile script." >&2
     exit 2
 fi
-source "$conda_sh"
+source "$CONDA_SH"
 conda activate "${CONDA_ENV:-atod-oprd}"
 cd "$repo_root"
 
