@@ -123,7 +123,7 @@ python3 -m verl.trainer.main_sod_oprd_bridge_stepwise_feedback \
     'trainer.logger=["console","swanlab"]' \
     trainer.project_name=verl_agent_alfworld \
     trainer.experiment_name=sod_oprd_bridge_stepwise_feedback_vllm_feedback_formal150_save10_eval5_4gpu \
-    trainer.n_gpus_per_node=4 \
+    trainer.n_gpus_per_node=8 \
     trainer.ray_wait_register_center_timeout=600 \
     trainer.nnodes=1 \
     trainer.save_freq=10 \

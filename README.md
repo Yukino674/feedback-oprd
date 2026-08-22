@@ -113,7 +113,7 @@ bash hidden_only/run_formal.sh
   环境执行重写后的动作，并在重写后的 response 上计算 hidden loss。正式配置同样为
   150 steps、每 10 steps 保存、每 5 steps 评估。
 - `stepwise_feedback/run_formal.sh`：非 Slurm 环境的独立正式运行脚本，包含完整的环境
-  初始化、路径检查和训练参数，默认使用 4 张 GPU。
+  初始化、路径检查和训练参数，默认使用 8 张 GPU。
 - `stepwise_feedback/run_formal.sbatch`：面向 Slurm 集群的同配置提交脚本；非 Slurm 用户
   不需要使用它。
 - `bridge_bank/`：bridge bank 构建脚本，不是训练入口；已有的 rank-64 bank 位于
