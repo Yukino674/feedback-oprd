@@ -88,12 +88,4 @@ sbatch stepwise_feedback/run_formal.sbatch
 sbatch hidden_only/run_formal.sbatch
 ```
 
-## 有意排除的内容
 
-本目录不包含实验日志、checkpoint、缓存、生成的曲线、PDF 和原始 ALFWorld 数据。
-训练/验证 parquet 文件以及 bridge bank tensor 已保留在仓库中。
-
-## 许可证
-
-仓库中的 ATOD/verl 基础代码遵循根目录 `LICENSE` 和 `Notice.txt` 中的许可与
-归属说明。新增的实验代码请同时遵守所依赖项目的许可证要求。
