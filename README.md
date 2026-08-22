@@ -112,11 +112,10 @@ bash hidden_only/run_formal.sh
   ALFWorld turn 中，学生先生成原始 response，teacher 通过 vLLM 给出反馈，学生重新生成，
   环境执行重写后的动作，并在重写后的 response 上计算 hidden loss。正式配置同样为
   150 steps、每 10 steps 保存、每 5 steps 评估。
-- `stepwise_feedback/run_formal.sh`：非 Slurm 环境的直接运行入口。它用 Bash 执行同目录
-  下的 `run_formal.sbatch`；其中的 `#SBATCH` 行会被 Bash 当作注释，不需要 Slurm。
-  正式配置默认使用 4 张 GPU。
-- `stepwise_feedback/run_formal.sbatch`：与上述 `.sh` 使用完全相同的正式配置；在 Slurm
-  集群上可以用 `sbatch` 提交，也可以像普通 Bash 脚本一样直接执行。
+- `stepwise_feedback/run_formal.sh`：非 Slurm 环境的独立正式运行脚本，包含完整的环境
+  初始化、路径检查和训练参数，默认使用 4 张 GPU。
+- `stepwise_feedback/run_formal.sbatch`：面向 Slurm 集群的同配置提交脚本；非 Slurm 用户
+  不需要使用它。
 - `bridge_bank/`：bridge bank 构建脚本，不是训练入口；已有的 rank-64 bank 位于
   `artifacts/bridge_bank/ps_bank.pt`。
 
