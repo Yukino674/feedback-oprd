@@ -96,15 +96,16 @@ parquet 文件和 bridge bank 默认使用仓库内的路径。设置好 ALFWorl
 bash stepwise_feedback/run_formal.sh
 ```
 
-或者运行 hidden-only 基线：
+或者直接运行 hidden-only 基线：
 
 ```bash
-sbatch hidden_only/run_formal.sbatch
+bash hidden_only/run_formal.sh
 ```
 
 ## 实验脚本简介
 
-- `hidden_only/run_formal.sbatch`：OPRD-Bridge hidden-only 基线。保留 SOD/OPD rollout
+- `hidden_only/run_formal.sh`：非 Slurm 环境的 hidden-only 基线直接运行入口。
+- `hidden_only/run_formal.sbatch`：OPRD-Bridge hidden-only 基线的正式参数脚本。保留 SOD/OPD rollout
   框架，但训练更新主要使用 hidden-state bridge loss，不使用逐步教师反馈。正式配置为
   150 steps，保存间隔 10 steps，评估间隔 5 steps。
 - `stepwise_feedback/run_formal.sbatch`：Step-wise Feedback-Guided OPRD-Bridge。每个
