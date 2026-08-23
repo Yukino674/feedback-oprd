@@ -15,6 +15,7 @@ from tensordict import TensorDict
 from transformers import GenerationConfig
 
 from verl import DataProto
+from verl.protocol import all_gather_data_proto
 from verl.single_controller.base.decorator import Dispatch, register
 from verl.utils.device import get_device_name, get_torch_device
 from verl.utils.fs import copy_to_local
@@ -32,9 +33,15 @@ from verl.workers.fsdp_workers_oprd_bridge_backbone_only import (
 class _TeacherVLLMFeedbackManager:
     """Wake/sleep a frozen teacher vLLM engine without syncing FSDP weights."""
 
-    def __init__(self, inference_engine, *, enable_sleep_mode: bool = True):
+    def __init__(self, inference_engine, *, enable_sleep_mode: bool = True, device_mesh=None):
         self.inference_engine = inference_engine
         self.enable_sleep_mode = enable_sleep_mode
+        self.device_mesh = device_mesh
+        self.tp_size = 1
+        self.tp_rank = 0
+        if device_mesh is not None:
+            self.tp_size = int(device_mesh["infer_tp"].size())
+            self.tp_rank = int(device_mesh["infer_tp"].get_local_rank())
 
     def __enter__(self):
         get_torch_device().empty_cache()
@@ -53,9 +60,13 @@ class _TeacherVLLMFeedbackManager:
         get_torch_device().empty_cache()
 
     def preprocess_data(self, data: DataProto) -> DataProto:
+        if self.tp_size > 1:
+            all_gather_data_proto(data=data, process_group=self.device_mesh["infer_tp"].get_group())
         return data
 
     def postprocess_data(self, data: DataProto) -> DataProto:
+        if self.tp_size > 1:
+            return data.chunk(chunks=self.tp_size)[self.tp_rank]
         return data
 
 
@@ -101,8 +112,8 @@ class ActorRolloutRefWorker(_BackboneActorRolloutRefWorker):
             if vllm_mode != "spmd":
                 raise NotImplementedError("Teacher feedback vLLM backend currently supports only spmd vLLM mode.")
             infer_tp = int(self.config.ref.get("feedback_tensor_model_parallel_size", 1))
-            if infer_tp != 1:
-                raise NotImplementedError("Teacher feedback vLLM currently supports tensor_model_parallel_size=1 only.")
+            if infer_tp < 1:
+                raise ValueError(f"teacher feedback infer_tp must be >= 1, got {infer_tp}")
             assert self.world_size % infer_tp == 0, (
                 f"ref world_size: {self.world_size} is not divisible by teacher feedback infer_tp: {infer_tp}"
             )
@@ -148,6 +159,7 @@ class ActorRolloutRefWorker(_BackboneActorRolloutRefWorker):
             self.teacher_feedback_sharding_manager = _TeacherVLLMFeedbackManager(
                 self.teacher_feedback_rollout.inference_engine,
                 enable_sleep_mode=bool(rollout_config.enable_sleep_mode),
+                device_mesh=rollout_device_mesh,
             )
             if self.rank == 0:
                 print("[StepFeedback] Teacher feedback vLLM rollout is ready.")

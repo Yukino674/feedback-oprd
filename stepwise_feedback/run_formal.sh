@@ -41,7 +41,7 @@ cd "$repo_root"
 
 run_root="${RUN_ROOT:-$repo_root/runs}"
 run_id="${RUN_ID:-manual}"
-export TMPDIR="${TMPDIR:-$run_root/tmp_sfbvllm_formal150_$run_id}"
+export TMPDIR="${TMPDIR:-$run_root/tmp_sfbvllm_formal150_8gpu_tp2_$run_id}"
 export TEMP="$TMPDIR"
 export TMP="$TMPDIR"
 # Ray appends a session directory and Unix socket names here. Keep the default
@@ -95,12 +95,12 @@ python3 -m verl.trainer.main_sod_oprd_bridge_stepwise_feedback \
     +actor_rollout_ref.actor.oprd_bridge_hidden_only_update=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
-    actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=32 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
     actor_rollout_ref.rollout.reuse_weights_across_turns=true \
     actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.3 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.20 \
     actor_rollout_ref.rollout.enable_chunked_prefill=False \
     actor_rollout_ref.rollout.enforce_eager=False \
     actor_rollout_ref.rollout.free_cache_engine=False \
@@ -110,11 +110,11 @@ python3 -m verl.trainer.main_sod_oprd_bridge_stepwise_feedback \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     +actor_rollout_ref.ref.model.path="$teacher_model_path" \
     +actor_rollout_ref.ref.feedback_backend=vllm \
-    +actor_rollout_ref.ref.feedback_tensor_model_parallel_size=1 \
+    +actor_rollout_ref.ref.feedback_tensor_model_parallel_size=2 \
     +actor_rollout_ref.ref.feedback_gpu_memory_utilization=0.30 \
     +actor_rollout_ref.ref.feedback_enable_sleep_mode=false \
-    +actor_rollout_ref.ref.feedback_release_after_rollout=true \
-    +actor_rollout_ref.ref.feedback_response_length=512 \
+    +actor_rollout_ref.ref.feedback_release_after_rollout=false \
+    +actor_rollout_ref.ref.feedback_response_length=256 \
     +actor_rollout_ref.ref.feedback_max_num_batched_tokens=8192 \
     +actor_rollout_ref.ref.feedback_max_num_seqs=4 \
     actor_rollout_ref.actor.use_invalid_action_penalty=True \
@@ -136,7 +136,7 @@ python3 -m verl.trainer.main_sod_oprd_bridge_stepwise_feedback \
     +algorithm.sod.hidden_signal.disable_logprob_opd=true \
     +algorithm.sod.stepwise_feedback.debug=false \
     +algorithm.sod.stepwise_feedback.student_max_tokens=512 \
-    +algorithm.sod.stepwise_feedback.teacher_max_tokens=512 \
+    +algorithm.sod.stepwise_feedback.teacher_max_tokens=256 \
     +algorithm.sod.stepwise_feedback.teacher_temperature=0.0 \
     +algorithm.sod.stepwise_feedback.teacher_top_p=1.0 \
     +algorithm.sod.stepwise_feedback.teacher_top_k=-1 \
@@ -155,7 +155,7 @@ python3 -m verl.trainer.main_sod_oprd_bridge_stepwise_feedback \
     trainer.critic_warmup=0 \
     'trainer.logger=["console","wandb"]' \
     trainer.project_name=verl_agent_alfworld \
-    trainer.experiment_name=sod_oprd_bridge_stepwise_feedback_vllm_feedback_formal150_save10_eval5_8gpu \
+    trainer.experiment_name=sod_oprd_bridge_stepwise_feedback_vllm_feedback_formal150_save10_eval5_8gpu_tp2 \
     trainer.n_gpus_per_node=8 \
     trainer.ray_wait_register_center_timeout=600 \
     trainer.nnodes=1 \

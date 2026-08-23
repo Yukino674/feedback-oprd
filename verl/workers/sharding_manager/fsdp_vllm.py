@@ -20,6 +20,7 @@ from collections import OrderedDict
 from typing import List
 
 import torch
+import torch.distributed as dist
 from peft import PeftModel
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp.api import FullStateDictConfig, ShardedStateDictConfig, StateDictType
@@ -27,9 +28,9 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataP
 
 try:
     # for torch 2.5+
-    from torch.distributed.tensor import DTensor
+    from torch.distributed.tensor import DTensor, Shard
 except ImportError:
-    from torch.distributed._tensor import DTensor
+    from torch.distributed._tensor import DTensor, Shard
 
 from dataclasses import asdict
 
@@ -259,6 +260,24 @@ class FSDPVLLMShardingManager(BaseShardingManager):
 
         return data.chunk(chunks=self.tp_size)[self.tp_rank]
 
+    @staticmethod
+    def _materialize_dtensor_for_vllm(param, device):
+        """Materialize a DTensor without functional/coalesced NCCL all-gather."""
+
+        local_tensor = param.to_local().to(device, non_blocking=True)
+        result = local_tensor
+        for mesh_dim, placement in reversed(tuple(enumerate(param.placements))):
+            if not isinstance(placement, Shard):
+                continue
+            group = param.device_mesh.get_group(mesh_dim)
+            gathered = [torch.empty_like(result) for _ in range(dist.get_world_size(group))]
+            dist.all_gather(gathered, result.contiguous(), group=group)
+            result = torch.cat(gathered, dim=placement.dim)
+            expected_size = param.shape[placement.dim]
+            if result.shape[placement.dim] > expected_size:
+                result = result.narrow(placement.dim, 0, expected_size)
+        return result
+
     def update_params(self, updated_params, peft_config=None):
         model = self.model_runner.model
         if peft_config:
@@ -286,7 +305,17 @@ class FSDPVLLMShardingManager(BaseShardingManager):
 
         patch_vllm_moe_model_weight_loader(model)
         device = get_torch_device().current_device()  # used when fsdp2 set cpu_offload_policy
-        loaded_params = model.load_weights(((name, param.to(device, non_blocking=True).full_tensor() if isinstance(param, DTensor) else param) for name, param in updated_params.items()))
+        loaded_params = model.load_weights(
+            (
+                (
+                    name,
+                    self._materialize_dtensor_for_vllm(param, device)
+                    if isinstance(param, DTensor)
+                    else param,
+                )
+                for name, param in updated_params.items()
+            )
+        )
 
         self.base_sync_done = True
         logger.info(f"vLLM load weights, loaded_params: {len(loaded_params) if loaded_params else -1}")

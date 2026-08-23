@@ -880,6 +880,7 @@ class StepwiseFeedbackTrajectoryCollector(TrajectoryCollector):
         ref_policy_wg=None,
     ) -> DataProto:
         if not is_train:
+            self._debug_log("mode=eval_student_only")
             return super().multi_turn_loop(
                 gen_batch=gen_batch,
                 actor_rollout_wg=actor_rollout_wg,
@@ -889,6 +890,7 @@ class StepwiseFeedbackTrajectoryCollector(TrajectoryCollector):
         if ref_policy_wg is None:
             raise ValueError("StepwiseFeedbackTrajectoryCollector requires ref_policy_wg for teacher feedback.")
 
+        self._debug_log("mode=train_stepwise_feedback")
         gen_batch = gen_batch.repeat(repeat_times=self.config.env.rollout.n, interleave=True)
         (
             total_batch_list,
