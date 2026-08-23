@@ -114,7 +114,7 @@ python3 -m verl.trainer.main_sod_oprd_bridge_stepwise_feedback \
     +actor_rollout_ref.ref.feedback_gpu_memory_utilization=0.30 \
     +actor_rollout_ref.ref.feedback_enable_sleep_mode=false \
     +actor_rollout_ref.ref.feedback_release_after_rollout=false \
-    +actor_rollout_ref.ref.feedback_response_length=256 \
+    +actor_rollout_ref.ref.feedback_response_length=512 \
     +actor_rollout_ref.ref.feedback_max_num_batched_tokens=8192 \
     +actor_rollout_ref.ref.feedback_max_num_seqs=4 \
     actor_rollout_ref.actor.use_invalid_action_penalty=True \
@@ -136,7 +136,7 @@ python3 -m verl.trainer.main_sod_oprd_bridge_stepwise_feedback \
     +algorithm.sod.hidden_signal.disable_logprob_opd=true \
     +algorithm.sod.stepwise_feedback.debug=false \
     +algorithm.sod.stepwise_feedback.student_max_tokens=512 \
-    +algorithm.sod.stepwise_feedback.teacher_max_tokens=256 \
+    +algorithm.sod.stepwise_feedback.teacher_max_tokens=512 \
     +algorithm.sod.stepwise_feedback.teacher_temperature=0.0 \
     +algorithm.sod.stepwise_feedback.teacher_top_p=1.0 \
     +algorithm.sod.stepwise_feedback.teacher_top_k=-1 \
