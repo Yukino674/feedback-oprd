@@ -72,12 +72,13 @@ When judging executability, compare the proposed action by exact string match ag
 Plausible ALFWorld commands that are not written verbatim in Actions are not executable.
 If the proposed action is not an exact string match in Actions, treat that as a mistake.
 The action hint should guide the student where to focus, but should not decide the final action for the student.
+If Mistake is "None.", set Action hint to "None." because the proposed action should normally be kept.
 Keep each field to one short sentence.
 
 Output exactly this format:
 Mistake: <the main issue, or "None." only when the proposed action exactly matches Actions and is appropriate>
 Reason: <whether the proposed action exactly matches Actions, and whether it fits the current observation>
-Action hint: <a high-level hint for choosing from the current admissible actions, not a full action command>
+Action hint: <"None." when Mistake is "None."; otherwise a high-level hint for choosing from the current admissible actions, not a full action command>
 """
 
 
@@ -99,6 +100,7 @@ Teacher feedback:
 Now it's your turn to take an action.
 You should first reason step-by-step about the current situation, using the teacher feedback to correct mistakes in your previous response while preserving useful reasoning when appropriate.
 Your final action must be copied exactly from Actions; do not invent, paraphrase, or add objects/prepositions.
+If the teacher says Mistake: None., normally keep the previous action unless the feedback gives a clear current-step reason to change it.
 If the teacher says your previous action does not exactly match Actions, choose another action from Actions.
 Once you've finished your reasoning, you should choose an admissible action for current step and present it within <action> </action> tags.
 """
