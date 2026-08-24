@@ -116,6 +116,10 @@ python3 -m verl.trainer.main_sod_oprd_bridge_stepwise_feedback \
     +algorithm.sod.stepwise_feedback.debug=false \
     +algorithm.sod.stepwise_feedback.student_max_tokens=512 \
     +algorithm.sod.stepwise_feedback.teacher_max_tokens=512 \
+    +algorithm.sod.stepwise_feedback.original_student_max_prompt_length=2048 \
+    +algorithm.sod.stepwise_feedback.eval_student_max_prompt_length=2048 \
+    +algorithm.sod.stepwise_feedback.teacher_feedback_max_prompt_length=4096 \
+    +algorithm.sod.stepwise_feedback.regeneration_max_prompt_length=4096 \
     +algorithm.sod.stepwise_feedback.teacher_temperature=0.0 \
     +algorithm.sod.stepwise_feedback.teacher_top_p=1.0 \
     +algorithm.sod.stepwise_feedback.teacher_top_k=-1 \
