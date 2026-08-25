@@ -17,16 +17,28 @@ skills 以及相关示例。自定义的 OPRD-Bridge 模块已经放在正确的
 - `patches/`：实验所需的 ATOD/verl 补丁快照。
 - `examples/`：OPD、SOD 和 ATOD 训练示例脚本。
 - `data/`：较小的训练/验证 parquet 文件；原始 ALFWorld 数据不包含在仓库中。
-- `artifacts/bridge_bank/`：rank-64 的 `ps_bank.pt` bridge bank。
+- `artifacts/bridge_bank/`：rank-64 的 OPRD-Bridge bank。
 - `ENVIRONMENT.md`：从实际 `atod-oprd` 环境导出的关键依赖说明。
 
 ## Bridge Bank 构建
 
-`ps_bank.pt` 基于 ALFWorld 的 TCOD/SDAR turn-level experience buffer 构建：先收集
+Bridge bank 基于 ALFWorld 的 TCOD/SDAR turn-level experience buffer 构建：先收集
 训练 step 的 student/teacher response hidden states，再提取所有 decoder
 层的 response-token 表示。对 teacher 表示拟合 PCA 子空间，并为每一对 student/teacher
 层训练线性投影器，使 student hidden 能对齐到 teacher 的低秩表示。构建脚本会生成多个
-rank 版本；本仓库使用的是 rank-64 的 `artifacts/bridge_bank/ps_bank.pt`。
+rank 版本；本仓库使用的是 rank-64 的
+`artifacts/bridge_bank/bank_alfworld_1p7b_8b_r64.pt`。
+
+如果使用 1.7B 学生到 4B GRPO 教师的新版 bank，建议命名为：
+
+```text
+artifacts/bridge_bank/bank_alfworld_1p7b_4bgrpo_r64.pt
+```
+
+本仓库同时保留这两个 rank-64 bank：
+
+- `bank_alfworld_1p7b_8b_r64.pt`：Qwen3-1.7B student -> Qwen3-8B teacher。
+- `bank_alfworld_1p7b_4bgrpo_r64.pt`：Qwen3-1.7B student -> Qwen3-4B-GRPO-ALFWorld teacher。
 
 对应脚本和配置位于 `bridge_bank/`：
 
@@ -39,7 +51,7 @@ rank 版本；本仓库使用的是 rank-64 的 `artifacts/bridge_bank/ps_bank.p
 训练需要准备以下外部资源：
 
 - Qwen3-1.7B 学生模型
-- Qwen3-8B 教师模型
+- Qwen3-8B 教师模型，或与所选 bridge bank 对应的 Qwen3-4B-GRPO 教师模型
 - 原始 ALFWorld 数据目录
 - CUDA GPU、Ray、vLLM 和 Flash-Attention 等运行依赖
 
@@ -149,6 +161,10 @@ bash hidden_only/run_formal.sh
 - `hidden_only/run_formal.sbatch`：OPRD-Bridge hidden-only 基线的正式参数脚本。保留 SOD/OPD rollout
   框架，但训练更新主要使用 hidden-state bridge loss，不使用逐步教师反馈。正式配置为
   150 steps，保存间隔 10 steps，评估间隔 5 steps。
+- `hidden_only/run_formal_1p7b_4bgrpo_8gpu.sbatch`：1.7B 学生到 4B GRPO 教师的
+  hidden-only 正式脚本，默认使用 `bank_alfworld_1p7b_4bgrpo_r64.pt`，8 卡、TP=1、
+  150 steps、每 10 steps 保存、每 5 steps 评估。运行前设置
+  `STUDENT_MODEL_PATH` 和 `TEACHER_MODEL_PATH`。
 - `stepwise_feedback/run_formal.sbatch`：Step-wise Feedback-Guided OPRD-Bridge。每个
   ALFWorld turn 中，学生先生成原始 response，teacher 通过 vLLM 给出反馈，学生重新生成，
   环境执行重写后的动作，并在重写后的 response 上计算 hidden loss。正式配置同样为
@@ -158,7 +174,7 @@ bash hidden_only/run_formal.sh
 - `stepwise_feedback/run_formal.sbatch`：面向 Slurm 集群的同配置提交脚本；非 Slurm 用户
   不需要使用它。
 - `bridge_bank/`：bridge bank 构建脚本，不是训练入口；已有的 rank-64 bank 位于
-  `artifacts/bridge_bank/ps_bank.pt`。
+  `artifacts/bridge_bank/bank_alfworld_1p7b_8b_r64.pt`。
 
 两个正式入口都支持通过环境变量覆盖模型、数据和 bank 路径，例如
 `STUDENT_MODEL_PATH`、`TEACHER_MODEL_PATH`、`TRAIN_FILE`、`VAL_FILE`、

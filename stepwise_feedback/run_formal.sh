@@ -23,7 +23,7 @@ WANDB_API_KEY="${WANDB_API_KEY:-}"
 
 # These files are included in the repository after `git lfs pull`.
 # Change them only when using external copies.
-BRIDGE_BANK_PATH="${BRIDGE_BANK_PATH:-$repo_root/artifacts/bridge_bank/ps_bank.pt}"
+BRIDGE_BANK_PATH="${BRIDGE_BANK_PATH:-$repo_root/artifacts/bridge_bank/bank_alfworld_1p7b_8b_r64.pt}"
 TRAIN_FILE="${TRAIN_FILE:-$repo_root/data/verl-agent/text/train.parquet}"
 VAL_FILE="${VAL_FILE:-$repo_root/data/verl-agent/text/test.parquet}"
 # ====================== END USER SETTINGS ======================

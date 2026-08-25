@@ -25,7 +25,7 @@ opd_only=true
 
 student_model_path="${STUDENT_MODEL_PATH:-$HOME/models/models/Qwen--Qwen3-1.7B/snapshots/master}"
 teacher_model_path="${TEACHER_MODEL_PATH:-$HOME/models/models/Qwen--Qwen3-8B/snapshots/master}"
-bridge_bank_path="${BRIDGE_BANK_PATH:-$repo_root/artifacts/bridge_bank/ps_bank.pt}"
+bridge_bank_path="${BRIDGE_BANK_PATH:-$repo_root/artifacts/bridge_bank/bank_alfworld_1p7b_8b_r64.pt}"
 
 train_data_size=16
 val_data_size=128

@@ -48,7 +48,7 @@ CONDA_ENV="atod-oprd"
 CONDA_SH="/path/to/miniconda3/etc/profile.d/conda.sh"
 ```
 
-仓库内的 `ps_bank.pt`、`train.parquet` 和 `test.parquet` 已经有默认路径，完成
+仓库内的 bridge bank、`train.parquet` 和 `test.parquet` 已经有默认路径，完成
 `git lfs pull` 后通常不需要修改。
 
 ## 4. 登录 WandB
