@@ -165,6 +165,8 @@ bash hidden_only/run_formal.sh
   hidden-only 正式脚本，默认使用 `bank_alfworld_1p7b_4bgrpo_r64.pt`，8 卡、TP=1、
   150 steps、每 10 steps 保存、每 5 steps 评估。运行前设置
   `STUDENT_MODEL_PATH` 和 `TEACHER_MODEL_PATH`。
+- `hidden_only/run_formal_1p7b_4bgrpo_8gpu.sh`：同一 1.7B 到 4B GRPO hidden-only
+  正式配置的非 Slurm 直接运行脚本，日志写入 WandB。
 - `stepwise_feedback/run_formal.sbatch`：Step-wise Feedback-Guided OPRD-Bridge。每个
   ALFWorld turn 中，学生先生成原始 response，teacher 通过 vLLM 给出反馈，学生重新生成，
   环境执行重写后的动作，并在重写后的 response 上计算 hidden loss。正式配置同样为
