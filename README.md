@@ -16,6 +16,7 @@ skills 以及相关示例。自定义的 OPRD-Bridge 模块已经放在正确的
 - `configs/`：训练脚本使用的实验配置。
 - `patches/`：实验所需的 ATOD/verl 补丁快照。
 - `examples/`：OPD、SOD 和 ATOD 训练示例脚本。
+- `legacy/`：早期实验入口和重复脚本，仅用于追溯历史，不作为推荐复现入口。
 - `data/`：较小的训练/验证 parquet 文件；原始 ALFWorld 数据不包含在仓库中。
 - `artifacts/bridge_bank/`：rank-64 的 OPRD-Bridge bank。
 - `ENVIRONMENT.md`：从实际 `atod-oprd` 环境导出的关键依赖说明。
