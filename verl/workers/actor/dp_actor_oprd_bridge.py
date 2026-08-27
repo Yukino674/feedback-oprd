@@ -339,7 +339,27 @@ class DataParallelPPOActor(BasePPOActor):
         else:
             mask = selected_mask
         mask = mask.to(per_token_loss.device, dtype=per_token_loss.dtype)
-        loss = (per_token_loss * mask).sum() / mask.sum().clamp_min(eps)
+        token_weight = None
+        if self.config.get("oprd_bridge_token_importance_weighting", False):
+            with torch.no_grad():
+                token_gap = per_token_loss.detach() * (student_norm.size(-1) / 2.0)
+                token_gap = token_gap.clamp_min(0.0)
+                weight_mean = (token_gap * mask).sum() / mask.sum().clamp_min(eps)
+                token_weight = token_gap / weight_mean.clamp_min(
+                    float(self.config.get("oprd_bridge_token_importance_eps", eps))
+                )
+                weight_min = float(self.config.get("oprd_bridge_token_importance_min", 0.1))
+                weight_max = float(self.config.get("oprd_bridge_token_importance_max", 10.0))
+                if weight_min < 0.0 or weight_max < weight_min:
+                    raise ValueError(
+                        "Invalid OPRD-Bridge token importance weight range: "
+                        f"min={weight_min}, max={weight_max}"
+                    )
+                token_weight = token_weight.clamp(min=weight_min, max=weight_max)
+                token_weight = token_weight * mask
+            loss = (per_token_loss * token_weight).sum() / token_weight.sum().clamp_min(eps)
+        else:
+            loss = (per_token_loss * mask).sum() / mask.sum().clamp_min(eps)
         scaled = loss * float(coef)
         with torch.no_grad():
             valid = mask.bool()
@@ -352,6 +372,17 @@ class DataParallelPPOActor(BasePPOActor):
                 if valid.any()
                 else 0.0,
             }
+            if token_weight is not None and valid.any():
+                valid_weight = token_weight[valid]
+                metrics.update({
+                    "actor/oprd_bridge_token_importance_enabled": 1.0,
+                    "actor/oprd_bridge_token_importance_weight_mean": float(valid_weight.mean().detach().item()),
+                    "actor/oprd_bridge_token_importance_weight_min": float(valid_weight.min().detach().item()),
+                    "actor/oprd_bridge_token_importance_weight_max": float(valid_weight.max().detach().item()),
+                    "actor/oprd_bridge_token_importance_gap_mean": float(token_gap[valid].mean().detach().item()),
+                })
+            else:
+                metrics["actor/oprd_bridge_token_importance_enabled"] = 0.0
         return scaled, metrics
 
     def _forward_micro_batch(self, micro_batch, temperature, calculate_entropy=False) -> Tuple[torch.Tensor, torch.Tensor]:
